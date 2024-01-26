@@ -39,6 +39,7 @@
     <surefire-plugin.version>3.2.5</surefire-plugin.version>
     <surefire.rerunFailingTestsCount>2</surefire.rerunFailingTestsCount>
     <failsafe-plugin.version>3.2.5</failsafe-plugin.version>
+    <io.fabric8.client.version>6.7.2</io.fabric8.client.version>
     <failsafe.rerunFailingTestsCount>${surefire.rerunFailingTestsCount}</failsafe.rerunFailingTestsCount>
   </properties>
   <dependencyManagement>
@@ -193,6 +194,16 @@
       <version>${com.google.java-format.version}</version>
       <scope>provided</scope>
     </dependency>
+    <dependency>
+      <groupId>io.fabric8</groupId>
+      <artifactId>openshift-client</artifactId>
+      <version>${io.fabric8.client.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>io.fabric8</groupId>
+      <artifactId>kubernetes-client</artifactId>
+      <version>${io.fabric8.client.version}</version>
+    </dependency>
 
     <dependency>
       <groupId>io.quarkus</groupId>
@@ -223,6 +234,18 @@
     <dependency>
       <groupId>org.testcontainers</groupId>
       <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>io.fabric8</groupId>
+      <artifactId>kubernetes-server-mock</artifactId>
+      <version>${io.fabric8.client.version}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>io.fabric8</groupId>
+      <artifactId>openshift-server-mock</artifactId>
+      <version>${io.fabric8.client.version}</version>
       <scope>test</scope>
     </dependency>
 

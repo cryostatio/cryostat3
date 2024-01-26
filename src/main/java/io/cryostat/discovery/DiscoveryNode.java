@@ -55,9 +55,6 @@ import org.jboss.logging.Logger;
 public class DiscoveryNode extends PanacheEntity {
 
     public static final String NODE_TYPE = "nodeType";
-    public static final String UNIVERSE = "Universe";
-    public static final String REALM = "Realm";
-    public static final String POD = "Pod";
 
     @Column(unique = false, nullable = false, updatable = false)
     @JsonView(Views.Flat.class)
@@ -95,9 +92,10 @@ public class DiscoveryNode extends PanacheEntity {
     }
 
     public static DiscoveryNode getUniverse() {
-        return DiscoveryNode.find(NODE_TYPE, UNIVERSE)
+        return DiscoveryNode.find(NODE_TYPE, BaseNodeType.UNIVERSE)
                 .<DiscoveryNode>singleResultOptional()
-                .orElseGet(() -> environment(UNIVERSE, UNIVERSE));
+                .orElseGet(
+                        () -> environment(BaseNodeType.UNIVERSE.toString(), BaseNodeType.UNIVERSE));
     }
 
     public static Optional<DiscoveryNode> getRealm(String name) {
@@ -109,10 +107,10 @@ public class DiscoveryNode extends PanacheEntity {
         return node.children.stream().filter(predicate).findFirst();
     }
 
-    public static DiscoveryNode environment(String name, String nodeType) {
+    public static DiscoveryNode environment(String name, NodeType nodeType) {
         DiscoveryNode node = new DiscoveryNode();
         node.name = name;
-        node.nodeType = nodeType;
+        node.nodeType = nodeType.getKind();
         node.labels = new HashMap<>();
         node.children = new ArrayList<>();
         node.target = null;
@@ -120,10 +118,10 @@ public class DiscoveryNode extends PanacheEntity {
         return node;
     }
 
-    public static DiscoveryNode target(Target target) {
+    public static DiscoveryNode target(Target target, NodeType nodeType) {
         DiscoveryNode node = new DiscoveryNode();
         node.name = target.connectUrl.toString();
-        node.nodeType = "JVM";
+        node.nodeType = nodeType.getKind();
         node.labels = new HashMap<>(target.labels);
         node.children = null;
         node.target = target;
