@@ -2,25 +2,30 @@ package io.cryostat.discovery;
 
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.ForkJoinPool;
+import java.util.stream.Collectors;
 
 import io.cryostat.core.sys.FileSystem;
+import io.cryostat.targets.Target.EventKind;
 
 import com.google.common.base.Optional;
+import io.fabric8.kubernetes.api.model.EndpointAddress;
+import io.fabric8.kubernetes.api.model.EndpointPort;
+import io.fabric8.kubernetes.api.model.EndpointSubset;
 import io.fabric8.kubernetes.api.model.Endpoints;
-import io.fabric8.kubernetes.api.model.HasMetadata;
 import io.fabric8.kubernetes.api.model.ObjectReference;
-import io.fabric8.kubernetes.api.model.OwnerReference;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.KubernetesClientBuilder;
 import io.fabric8.kubernetes.client.informers.ResourceEventHandler;
 import io.fabric8.kubernetes.client.informers.SharedIndexInformer;
-import io.fabric8.openshift.api.model.Route;
-import io.fabric8.openshift.client.OpenShiftClient;
 import io.quarkus.runtime.ShutdownEvent;
 import io.quarkus.runtime.StartupEvent;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -28,28 +33,11 @@ import jakarta.enterprise.event.Observes;
 import jakarta.inject.Inject;
 import jakarta.transaction.Transactional;
 import org.apache.commons.lang3.StringUtils;
+import org.apache.commons.lang3.builder.EqualsBuilder;
 import org.apache.commons.lang3.concurrent.ConcurrentException;
 import org.apache.commons.lang3.concurrent.LazyInitializer;
-import org.apache.commons.lang3.tuple.Pair;
-import org.apache.commons.lang3.tuple.Triple;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
-
-@ApplicationScoped
-class OpenShiftDiscovery extends KubeApiDiscovery {
-    @ConfigProperty(name = "cryostat.discovery.openshift.enabled")
-    boolean enabled;
-
-    @Override
-    boolean available() {
-        return super.available() && client().supports(Route.class);
-    }
-
-    @Override
-    OpenShiftClient client() {
-        return kubeConfig.withOpenShift(super.client());
-    }
-}
 
 @ApplicationScoped
 public class KubeApiDiscovery {
@@ -64,14 +52,11 @@ public class KubeApiDiscovery {
     @ConfigProperty(name = "cryostat.discovery.kubernetes.enabled")
     boolean enabled;
 
-    // private Integer memoHash;
-    // private EnvironmentNode memoTree;
-    // private final Lazy<JFRConnectionToolkit> connectionToolkit;
-    // private final Logger logger;
-    private final Map<Triple<String, String, String>, Pair<HasMetadata, DiscoveryNode>>
-            discoveryNodeCache = new ConcurrentHashMap<>();
-    // private final Map<Triple<String, String, String>, Object> queryLocks =
-    //         new ConcurrentHashMap<>();
+    @ConfigProperty(name = "cryostat.discovery.k8s.port-names")
+    Optional<List<String>> JmxPortNames;
+
+    @ConfigProperty(name = "cryostat.discovery.k8s.port-numbers")
+    Optional<List<Integer>> JmxPortNumbers;
 
     private final LazyInitializer<HashMap<String, SharedIndexInformer<Endpoints>>> nsInformers =
             new LazyInitializer<HashMap<String, SharedIndexInformer<Endpoints>>>() {
@@ -89,18 +74,15 @@ public class KubeApiDiscovery {
                                     ns -> {
                                         result.put(
                                                 ns,
-                                                kubeConfig
-                                                        .kubeClient()
-                                                        .endpoints()
+                                                client().endpoints()
                                                         .inNamespace(ns)
                                                         .inform(
                                                                 new EndpointsHandler(),
                                                                 ENDPOINTS_INFORMER_RESYNC_PERIOD));
-                                        logger.info(
-                                                String.format(
-                                                        "Started Endpoints SharedInformer for"
-                                                                + " namespace \"{}\"",
-                                                        ns));
+                                        logger.infov(
+                                                "Started Endpoints SharedInformer for"
+                                                        + " namespace \"{}\"",
+                                                ns);
                                     });
                     return result;
                 }
@@ -128,20 +110,17 @@ public class KubeApiDiscovery {
             universe.persist();
         }
 
-        logger.info(String.format("Starting %s client", REALM));
+        logger.infov("Starting %s client", REALM);
 
-        try {
-            nsInformers.get(); // trigger lazy init
-        } catch (ConcurrentException e) {
-            throw new IllegalStateException(e);
-        }
+        safeGetInformers(); // trigger lazy init
     }
 
     void onStop(@Observes ShutdownEvent evt) {
         if (!(enabled() && available())) {
             return;
         }
-        logger.info(String.format("Shutting down %s client", REALM));
+
+        logger.infov("Shutting down %s client", REALM);
     }
 
     boolean enabled() {
@@ -162,58 +141,6 @@ public class KubeApiDiscovery {
         return kubeConfig.kubeClient();
     }
 
-    // @Override
-    // public List<ServiceRef> listDiscoverableServices() {
-    //     try {
-    //         return getAllServiceRefs();
-    //     } catch (Exception e) {
-    //         logger.warn(e);
-    //         return Collections.emptyList();
-    //     }
-    // }
-
-    // @Override
-    // public EnvironmentNode getDiscoveryTree() {
-    //     int currentHash = 0;
-    //     HashCodeBuilder hcb = new HashCodeBuilder();
-    //     Map<String, SharedIndexInformer<Endpoints>> informers = safeGetInformers();
-    //     for (var informer : informers.values()) {
-    //         List<Endpoints> store = informer.getStore().list();
-    //         hcb.append(store.hashCode());
-    //     }
-    //     currentHash = hcb.build();
-    //     if (Objects.equals(memoHash, currentHash)) {
-    //         logger.trace("Using memoized discovery tree");
-    //         return new EnvironmentNode(memoTree);
-    //     }
-    //     memoHash = currentHash;
-    //     EnvironmentNode realmNode =
-    //             new EnvironmentNode(REALM, BaseNodeType.REALM, Collections.emptyMap(), Set.of());
-    //     informers
-    //             .entrySet()
-    //             .forEach(
-    //                     entry -> {
-    //                         var namespace = entry.getKey();
-    //                         var store = entry.getValue().getStore().list();
-    //                         EnvironmentNode nsNode =
-    //                                 new EnvironmentNode(namespace, KubernetesNodeType.NAMESPACE);
-    //                         try {
-    //                             store.stream()
-    //                                     .flatMap(endpoints ->
-    // getTargetTuples(endpoints).stream())
-    //                                     .forEach(tuple -> buildOwnerChain(nsNode, tuple));
-    //                         } catch (Exception e) {
-    //                             logger.warn(e);
-    //                         } finally {
-    //                             discoveryNodeCache.clear();
-    //                             queryLocks.clear();
-    //                         }
-    //                         realmNode.addChildNode(nsNode);
-    //                     });
-    //     memoTree = realmNode;
-    //     return realmNode;
-    // }
-
     private Map<String, SharedIndexInformer<Endpoints>> safeGetInformers() {
         Map<String, SharedIndexInformer<Endpoints>> informers;
         try {
@@ -224,153 +151,34 @@ public class KubeApiDiscovery {
         return informers;
     }
 
-    // private void buildOwnerChain(EnvironmentNode nsNode, TargetTuple targetTuple) {
-    //     ObjectReference target = targetTuple.addr.getTargetRef();
-    //     if (target == null) {
-    //         logger.error(
-    //                 "Address {} for Endpoint {} had null target reference",
-    //                 targetTuple.addr.getIp() != null
-    //                         ? targetTuple.addr.getIp()
-    //                         : targetTuple.addr.getHostname(),
-    //                 targetTuple.objRef.getName());
-    //         return;
-    //     }
-    //     String targetKind = target.getKind();
-    //     KubernetesNodeType targetType = KubernetesNodeType.fromKubernetesKind(targetKind);
-    //     if (targetType == KubernetesNodeType.POD) {
-    //         // if the Endpoint points to a Pod, chase the owner chain up as far as possible, then
-    //         // add that to the Namespace
-
-    //         Pair<HasMetadata, EnvironmentNode> pod =
-    //                 discoveryNodeCache.computeIfAbsent(
-    //                         cacheKey(target.getNamespace(), target), this::queryForNode);
-    //         pod.getRight()
-    //                 .addChildNode(
-    //                         new TargetNode(
-    //                                 KubernetesNodeType.ENDPOINT, targetTuple.toServiceRef()));
-
-    //         Pair<HasMetadata, EnvironmentNode> node = pod;
-    //         while (true) {
-    //             Pair<HasMetadata, EnvironmentNode> owner = getOrCreateOwnerNode(node);
-    //             if (owner == null) {
-    //                 break;
-    //             }
-    //             EnvironmentNode ownerNode = owner.getRight();
-    //             ownerNode.addChildNode(node.getRight());
-    //             node = owner;
-    //         }
-    //         nsNode.addChildNode(node.getRight());
-    //     } else {
-    //         // if the Endpoint points to something else(?) than a Pod, just add the target
-    // straight
-    //         // to the Namespace
-    //         nsNode.addChildNode(
-    //                 new TargetNode(KubernetesNodeType.ENDPOINT, targetTuple.toServiceRef()));
-    //     }
-    // }
-
-    // private Pair<HasMetadata, EnvironmentNode> getOrCreateOwnerNode(
-    //         Pair<HasMetadata, EnvironmentNode> child) {
-    //     HasMetadata childRef = child.getLeft();
-    //     if (childRef == null) {
-    //         logger.error(
-    //                 "Could not locate node named {} of kind {} while traversing environment",
-    //                 child.getRight().getName(),
-    //                 child.getRight().getNodeType());
-    //         return null;
-    //     }
-    //     List<OwnerReference> owners = childRef.getMetadata().getOwnerReferences();
-    //     // Take first "expected" owner Kind from NodeTypes, or if none, simply use the first
-    // owner.
-    //     // If there are no owners then return null to signify this and break the chain
-    //     if (owners.isEmpty()) {
-    //         return null;
-    //     }
-    //     String namespace = childRef.getMetadata().getNamespace();
-    //     OwnerReference owner =
-    //             owners.stream()
-    //                     .filter(o -> KubernetesNodeType.fromKubernetesKind(o.getKind()) != null)
-    //                     .findFirst()
-    //                     .orElse(owners.get(0));
-    //     return discoveryNodeCache.computeIfAbsent(cacheKey(namespace, owner),
-    // this::queryForNode);
-    // }
-
-    private Triple<String, String, String> cacheKey(String ns, OwnerReference resource) {
-        return Triple.of(ns, resource.getKind(), resource.getName());
+    private boolean isCompatiblePort(EndpointPort port) {
+        return JmxPortNames.or(List.of()).contains(port.getName())
+                || JmxPortNumbers.or(List.of()).contains(port.getPort());
     }
 
-    // Unfortunately, ObjectReference and OwnerReference both independently implement getKind and
-    // getName - they don't come from a common base class.
-    private Triple<String, String, String> cacheKey(String ns, ObjectReference resource) {
-        return Triple.of(ns, resource.getKind(), resource.getName());
+    private List<TargetRef> getTargetRefsFrom(Endpoints endpoints) {
+        return TargetRef.fromEndpoints(endpoints).stream()
+                .filter(
+                        (ref) -> {
+                            return Objects.nonNull(ref) && isCompatiblePort(ref.port());
+                        })
+                .collect(Collectors.toList());
     }
 
-    // private Pair<HasMetadata, EnvironmentNode> queryForNode(
-    //         Triple<String, String, String> lookupKey) {
-    //     String namespace = lookupKey.getLeft();
-    //     KubernetesNodeType nodeType =
-    // KubernetesNodeType.fromKubernetesKind(lookupKey.getMiddle());
-    //     String nodeName = lookupKey.getRight();
-    //     if (nodeType == null) {
-    //         return null;
-    //     }
-    //     synchronized (queryLocks.computeIfAbsent(lookupKey, k -> new Object())) {
-    //         EnvironmentNode node;
-    //         HasMetadata kubeObj =
-    //
-    // nodeType.getQueryFunction().apply(k8sClient).apply(namespace).apply(nodeName);
-    //         if (kubeObj != null) {
-    //             node = new EnvironmentNode(nodeName, nodeType,
-    // kubeObj.getMetadata().getLabels());
-    //         } else {
-    //             node = new EnvironmentNode(nodeName, nodeType);
-    //         }
-    //         return Pair.of(kubeObj, node);
-    //     }
-    // }
+    @Transactional
+    public void handleEndpointEvent(TargetRef ref, EventKind eventKind) {
+        // TODO: Handle endpoint event
+    }
 
-    // private boolean isCompatiblePort(EndpointPort port) {
-    //     return "jfr-jmx".equals(port.getName()) || 9091 == port.getPort();
-    // }
-
-    // private List<ServiceRef> getAllServiceRefs() {
-    //     return safeGetInformers().values().stream()
-    //             .flatMap(i -> i.getStore().list().stream())
-    //             .flatMap(endpoints -> getServiceRefs(endpoints).stream())
-    //             .collect(Collectors.toList());
-    // }
-
-    // private List<TargetTuple> getTargetTuples(Endpoints endpoints) {
-    //     List<TargetTuple> tts = new ArrayList<>();
-    //     for (EndpointSubset subset : endpoints.getSubsets()) {
-    //         for (EndpointPort port : subset.getPorts()) {
-    //             if (!isCompatiblePort(port)) {
-    //                 continue;
-    //             }
-    //             for (EndpointAddress addr : subset.getAddresses()) {
-    //                 tts.add(new TargetTuple(addr.getTargetRef(), addr, port));
-    //             }
-    //         }
-    //     }
-    //     return tts;
-    // }
-
-    // private List<ServiceRef> getServiceRefs(Endpoints endpoints) {
-    //     return getTargetTuples(endpoints).stream()
-    //             .map(TargetTuple::toServiceRef)
-    //             .filter(Objects::nonNull)
-    //             .collect(Collectors.toList());
-    // }
-
-    class KubeConfig {
+    @ApplicationScoped
+    static final class KubeConfig {
         public static final String KUBERNETES_NAMESPACE_PATH =
                 "/var/run/secrets/kubernetes.io/serviceaccount/namespace";
 
         @Inject Logger logger;
         @Inject FileSystem fs;
 
-        @ConfigProperty(name = "cryostat.k8s.namespaces")
+        @ConfigProperty(name = "cryostat.discovery.k8s.namespaces")
         Optional<List<String>> watchNamespaces;
 
         @ConfigProperty(name = "kubernetes.service.host")
@@ -404,126 +212,137 @@ public class KubeApiDiscovery {
             }
             return kubeClient;
         }
-
-        OpenShiftClient withOpenShift(KubernetesClient client) {
-            return client.adapt(OpenShiftClient.class);
-        }
     }
 
     private final class EndpointsHandler implements ResourceEventHandler<Endpoints> {
-
         @Override
-        public void onAdd(Endpoints obj) {
-            // TODO Auto-generated method stub
-            throw new UnsupportedOperationException("Unimplemented method 'onAdd'");
+        public void onAdd(Endpoints endpoints) {
+            getTargetRefsFrom(endpoints)
+                    .forEach(
+                            (refs) -> {
+                                handleEndpointEvent(refs, EventKind.FOUND);
+                            });
         }
 
         @Override
-        public void onUpdate(Endpoints oldObj, Endpoints newObj) {
-            // TODO Auto-generated method stub
-            throw new UnsupportedOperationException("Unimplemented method 'onUpdate'");
+        public void onUpdate(Endpoints oldEndpoints, Endpoints newEndpoints) {
+            Set<TargetRef> previousRefs = new HashSet<>(getTargetRefsFrom(oldEndpoints));
+            Set<TargetRef> currentRefs = new HashSet<>(getTargetRefsFrom(newEndpoints));
+
+            if (previousRefs.equals(currentRefs)) {
+                return;
+            }
+
+            TargetRef.compare(previousRefs).to(currentRefs).updated().stream()
+                    .forEach(ref -> handleEndpointEvent(ref, EventKind.MODIFIED));
+
+            TargetRef.compare(previousRefs).to(currentRefs).added().stream()
+                    .forEach(ref -> handleEndpointEvent(ref, EventKind.FOUND));
+
+            TargetRef.compare(previousRefs).to(currentRefs).removed().stream()
+                    .forEach(ref -> handleEndpointEvent(ref, EventKind.LOST));
         }
 
         @Override
-        public void onDelete(Endpoints obj, boolean deletedFinalStateUnknown) {
-            // TODO Auto-generated method stub
-            throw new UnsupportedOperationException("Unimplemented method 'onDelete'");
+        public void onDelete(Endpoints endpoints, boolean deletedFinalStateUnknown) {
+            if (deletedFinalStateUnknown) {
+                logger.warnv("Deleted final state unknown: {}", endpoints);
+                return;
+            }
+            getTargetRefsFrom(endpoints)
+                    .forEach(
+                            (tt) -> {
+                                handleEndpointEvent(tt, EventKind.LOST);
+                            });
         }
-        //         @Override
-        //         public void onAdd(Endpoints endpoints) {
-        //             getServiceRefs(endpoints)
-        //                     .forEach(serviceRef -> notifyAsyncTargetDiscovery(EventKind.FOUND,
-        // serviceRef));
-        //         }
-
-        //         @Override
-        //         public void onUpdate(Endpoints oldEndpoints, Endpoints newEndpoints) {
-        //             Set<ServiceRef> previousRefs = new HashSet<>(getServiceRefs(oldEndpoints));
-        //             Set<ServiceRef> currentRefs = new HashSet<>(getServiceRefs(newEndpoints));
-
-        //             if (previousRefs.equals(currentRefs)) {
-        //                 return;
-        //             }
-
-        //             ServiceRef.compare(previousRefs).to(currentRefs).updated().stream()
-        //                     .forEach(sr -> notifyAsyncTargetDiscovery(EventKind.MODIFIED, sr));
-
-        //             ServiceRef.compare(previousRefs).to(currentRefs).added().stream()
-        //                     .forEach(sr -> notifyAsyncTargetDiscovery(EventKind.FOUND, sr));
-        // `
-        //             ServiceRef.compare(previousRefs).to(currentRefs).removed().stream()
-        //                     .forEach(sr -> notifyAsyncTargetDiscovery(EventKind.LOST, sr));
-        //         }
-
-        //         @Override
-        //         public void onDelete(Endpoints endpoints, boolean deletedFinalStateUnknown) {
-        //             if (deletedFinalStateUnknown) {
-        //                 logger.warn("Deleted final state unknown: {}", endpoints);
-        //                 return;
-        //             }
-        //             getServiceRefs(endpoints)
-        //                     .forEach(serviceRef -> notifyAsyncTargetDiscovery(EventKind.LOST,
-        // serviceRef));
-        //         }
     }
 
-    // class TargetTuple {
-    //     ObjectReference objRef;
-    //     EndpointAddress addr;
-    //     EndpointPort port;
+    static record TargetRef(ObjectReference objRef, EndpointAddress addr, EndpointPort port) {
+        TargetRef {
+            Objects.requireNonNull(objRef);
+            Objects.requireNonNull(addr);
+            Objects.requireNonNull(port);
+        }
 
-    //     TargetTuple(ObjectReference objRef, EndpointAddress addr, EndpointPort port) {
-    //         this.objRef = objRef;
-    //         this.addr = addr;
-    //         this.port = port;
-    //     }
+        static List<TargetRef> fromEndpoints(Endpoints endpoints) {
+            List<TargetRef> tts = new ArrayList<>();
+            for (EndpointSubset subset : endpoints.getSubsets()) {
+                for (EndpointPort port : subset.getPorts()) {
+                    for (EndpointAddress addr : subset.getAddresses()) {
+                        tts.add(new TargetRef(addr.getTargetRef(), addr, port));
+                    }
+                }
+            }
+            return tts;
+        }
 
-    //     Target toTarget() {
-    //         Pair<HasMetadata, DiscoveryNode> node =
-    //                 discoveryNodeCache.computeIfAbsent(
-    //                         cacheKey(objRef.getNamespace(), objRef),
-    //                         this::queryForNode);
-    //         HasMetadata podRef = node.getLeft();
-    //         if (node.getRight().getNodeType() != KubernetesNodeType.POD) {
-    //             throw new IllegalStateException();
-    //         }
-    //         if (podRef == null) {
-    //             throw new IllegalStateException();
-    //         }
-    //         try {
-    //             String targetName = objRef.getName();
+        @Override
+        public boolean equals(Object other) {
+            if (other == null) {
+                return false;
+            }
+            if (other == this) {
+                return true;
+            }
+            if (!(other instanceof TargetRef)) {
+                return false;
+            }
+            TargetRef sr = (TargetRef) other;
+            return new EqualsBuilder()
+                    .append(objRef().getName(), objRef().getName())
+                    .append(addr(), sr.addr())
+                    .append(port(), sr.port())
+                    .build();
+        }
 
-    //             String ip = addr.getIp().replaceAll("\\.", "-");
-    //             String namespace = podRef.getMetadata().getNamespace();
-    //             String host = String.format("%s.%s.pod", ip, namespace);
+        public static Compare compare(Collection<TargetRef> src) {
+            return new Compare(src);
+        }
 
-    //             JMXServiceURL jmxUrl =
-    //                     new JMXServiceURL(
-    //                             "rmi",
-    //                             "",
-    //                             0,
-    //                             "/jndi/rmi://" + host + ':' + port.getPort() + "/jmxrmi");
-    //             ServiceRef serviceRef =
-    //                     new ServiceRef(null, URI.create(jmxUrl.toString()), targetName);
-    //             serviceRef.setLabels(podRef.getMetadata().getLabels());
-    //             serviceRef.setPlatformAnnotations(podRef.getMetadata().getAnnotations());
-    //             serviceRef.setCryostatAnnotations(
-    //                     Map.of(
-    //                             AnnotationKey.REALM,
-    //                             REALM,
-    //                             AnnotationKey.HOST,
-    //                             addr.getIp(),
-    //                             AnnotationKey.PORT,
-    //                             Integer.toString(port.getPort()),
-    //                             AnnotationKey.NAMESPACE,
-    //                             addr.getTargetRef().getNamespace(),
-    //                             AnnotationKey.POD_NAME,
-    //                             addr.getTargetRef().getName()));
-    //             return serviceRef;
-    //         } catch (Exception e) {
-    //             logger.warn(e);
-    //             return null;
-    //         }
-    //     }
-    // }
+        public static class Compare {
+            private Collection<TargetRef> previous, current;
+
+            public Compare(Collection<TargetRef> previous) {
+                this.previous = new HashSet<>(previous);
+            }
+
+            public Compare to(Collection<TargetRef> current) {
+                this.current = new HashSet<>(current);
+                return this;
+            }
+
+            public Collection<TargetRef> added() {
+                return removeAllUpdatedRefs(addedOrUpdatedRefs(), updated());
+            }
+
+            public Collection<TargetRef> removed() {
+                return removeAllUpdatedRefs(removedOrUpdatedRefs(), updated());
+            }
+
+            public Collection<TargetRef> updated() {
+                Collection<TargetRef> updated = addedOrUpdatedRefs();
+                updated.removeAll(removedOrUpdatedRefs());
+                return updated;
+            }
+
+            private Collection<TargetRef> addedOrUpdatedRefs() {
+                Collection<TargetRef> added = new HashSet<>(current);
+                added.removeAll(previous);
+                return added;
+            }
+
+            private Collection<TargetRef> removedOrUpdatedRefs() {
+                Collection<TargetRef> removed = new HashSet<>(previous);
+                removed.removeAll(current);
+                return removed;
+            }
+
+            private Collection<TargetRef> removeAllUpdatedRefs(
+                    Collection<TargetRef> src, Collection<TargetRef> updated) {
+                Collection<TargetRef> tnSet = new HashSet<>(src);
+                tnSet.removeAll(updated);
+                return tnSet;
+            }
+        }
+    }
 }
