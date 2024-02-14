@@ -16,8 +16,12 @@
 package io.cryostat.reports;
 
 import java.io.BufferedInputStream;
+import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
+import java.net.URISyntaxException;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
@@ -35,16 +39,24 @@ import io.cryostat.util.HttpStatusCodeIdentifier;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.quarkus.runtime.ShutdownEvent;
+import io.quarkus.runtime.StartupEvent;
 import io.smallrye.common.annotation.Blocking;
 import io.smallrye.mutiny.Uni;
 import io.vertx.ext.web.handler.HttpException;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.event.Observes;
 import jakarta.inject.Inject;
+import org.apache.commons.lang3.tuple.Pair;
 import org.apache.hc.client5.http.classic.methods.HttpPost;
 import org.apache.hc.client5.http.entity.mime.MultipartEntityBuilder;
+import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
 import org.apache.hc.client5.http.impl.classic.HttpClients;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
+import software.amazon.awssdk.services.s3.model.GetObjectRequest;
+import software.amazon.awssdk.services.s3.presigner.S3Presigner;
+import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest;
 
 @ApplicationScoped
 class ReportsServiceImpl implements ReportsService {
@@ -52,10 +64,27 @@ class ReportsServiceImpl implements ReportsService {
     @ConfigProperty(name = ConfigProperties.REPORTS_SIDECAR_URL)
     Optional<URI> sidecarUri;
 
+    @ConfigProperty(name = ConfigProperties.AWS_BUCKET_NAME_ARCHIVES)
+    String archiveBucket;
+
+    @ConfigProperty(name = ConfigProperties.STORAGE_EXT_URL)
+    Optional<String> externalStorageUrl;
+
     @Inject ObjectMapper mapper;
     @Inject RecordingHelper helper;
     @Inject InterruptibleReportGenerator reportGenerator;
+    @Inject S3Presigner presigner;
     @Inject Logger logger;
+
+    CloseableHttpClient http;
+
+    void onStart(@Observes StartupEvent evt) {
+        this.http = HttpClients.createSystem();
+    }
+
+    void onStop(@Observes ShutdownEvent evt) throws IOException {
+        this.http.close();
+    }
 
     @Blocking
     @Override
@@ -69,8 +98,7 @@ class ReportsServiceImpl implements ReportsService {
                                             "sidecar reportFor active recording {0} {1}",
                                             recording.target.jvmId, recording.remoteId);
                                     try {
-                                        return fireRequest(
-                                                uri, helper.getActiveInputStream(recording));
+                                        return fireRequest(uri, getPresignedUri(recording));
                                     } catch (Exception e) {
                                         throw new ReportGenerationException(e);
                                     }
@@ -101,9 +129,11 @@ class ReportsServiceImpl implements ReportsService {
                                     logger.tracev(
                                             "sidecar reportFor archived recording {0} {1}",
                                             jvmId, filename);
-                                    return fireRequest(
-                                            uri,
-                                            helper.getArchivedRecordingStream(jvmId, filename));
+                                    try {
+                                        return fireRequest(uri, getPresignedPath(jvmId, filename));
+                                    } catch (Exception e) {
+                                        throw new ReportGenerationException(e);
+                                    }
                                 })
                         .orElseGet(
                                 () -> {
@@ -124,12 +154,39 @@ class ReportsServiceImpl implements ReportsService {
                 new BufferedInputStream(stream), predicate);
     }
 
-    private Future<Map<String, AnalysisResult>> fireRequest(URI uri, InputStream stream) {
+    private URI getPresignedUri(ActiveRecording recording) throws Exception {
+        // TODO refactor, this is copied out of Recordings.java
+        String savename = recording.name;
+        String filename = helper.saveRecording(recording, savename, Instant.now().plusSeconds(60));
+        return getPresignedPath(recording.target.jvmId, filename);
+    }
+
+    private URI getPresignedPath(String jvmId, String filename) throws URISyntaxException {
+        // TODO refactor, this is copied out of Recordings.java
+        logger.infov("Handling presigned download request for {0}/{1}", jvmId, filename);
+        GetObjectRequest getRequest =
+                GetObjectRequest.builder()
+                        .bucket(archiveBucket)
+                        .key(helper.archivedRecordingKey(Pair.of(jvmId, filename)))
+                        .build();
+        GetObjectPresignRequest presignRequest =
+                GetObjectPresignRequest.builder()
+                        .signatureDuration(Duration.ofMinutes(1))
+                        .getObjectRequest(getRequest)
+                        .build();
+        return URI.create(presigner.presignGetObject(presignRequest).url().toString()).normalize();
+    }
+
+    private Future<Map<String, AnalysisResult>> fireRequest(
+            URI sidecarUri, URI presignedRecordingUri) {
         var cf = new CompletableFuture<Map<String, AnalysisResult>>();
-        try (var http = HttpClients.createDefault();
-                stream) {
-            var post = new HttpPost(uri.resolve("report"));
-            var form = MultipartEntityBuilder.create().addBinaryBody("file", stream).build();
+        try {
+            var post = new HttpPost(sidecarUri.resolve("remote_report"));
+            var form =
+                    MultipartEntityBuilder.create()
+                            .addTextBody("path", presignedRecordingUri.getPath())
+                            .addTextBody("query", presignedRecordingUri.getQuery())
+                            .build();
             post.setEntity(form);
             http.execute(
                     post,
