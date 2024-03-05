@@ -21,11 +21,9 @@ import static org.hamcrest.Matchers.is;
 
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -34,8 +32,10 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
+import io.cryostat.discovery.DiscoveryNode;
 import io.cryostat.util.HttpMimeType;
 
+import com.fasterxml.jackson.core.type.TypeReference;
 import io.vertx.core.MultiMap;
 import io.vertx.core.buffer.Buffer;
 import io.vertx.core.http.HttpHeaders;
@@ -55,7 +55,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 @TestMethodOrder(OrderAnnotation.class)
-@Disabled("TODO not all GraphQL queries are implemented")
+// @Disabled("TODO not all GraphQL queries are implemented")
 class GraphQLTest extends StandardSelfTest {
 
     private final ExecutorService worker = ForkJoinPool.commonPool();
@@ -69,7 +69,10 @@ class GraphQLTest extends StandardSelfTest {
         query.put(
                 "query",
                 "query { environmentNodes(filter: { name: \"Custom Targets\" }) { name nodeType"
-                        + " descendantTargets { name nodeType } } }");
+                        + " children { name nodeType } } }");
+
+        System.out.println("+++ Query sent: " + query.encodePrettily());
+
         HttpResponse<Buffer> resp =
                 webClient
                         .extensions()
@@ -77,31 +80,39 @@ class GraphQLTest extends StandardSelfTest {
         MatcherAssert.assertThat(
                 resp.statusCode(),
                 Matchers.both(Matchers.greaterThanOrEqualTo(200)).and(Matchers.lessThan(300)));
-        EnvironmentNodesResponse actual =
-                mapper.readValue(resp.bodyAsString(), EnvironmentNodesResponse.class);
 
-        EnvironmentNodes expected = new EnvironmentNodes();
+        TypeReference<EnvironmentNodesResponse> typeRef =
+                new TypeReference<EnvironmentNodesResponse>() {};
+        EnvironmentNodesResponse actual = mapper.readValue(resp.bodyAsString(), typeRef);
 
-        EnvironmentNode jdp = new EnvironmentNode();
-        jdp.name = "JDP";
-        jdp.nodeType = "Realm";
+        List<DiscoveryNode> expectedChildren = new ArrayList<>();
+        DiscoveryNode expectedChild = new DiscoveryNode();
+        expectedChild.name = "service:jmx:rmi:///jndi/rmi://localhost:0/jmxrmi";
+        expectedChild.nodeType = "JVM";
+        expectedChildren.add(expectedChild);
 
-        jdp.descendantTargets = new ArrayList<>();
-        Node cryostat = new Node();
-        cryostat.name = "service:jmx:rmi:///jndi/rmi://localhost:0/jmxrmi";
-        cryostat.nodeType = "JVM";
-        jdp.descendantTargets.add(cryostat);
+        DiscoveryNode expectedNode = new DiscoveryNode();
+        expectedNode.name = "Custom Targets";
+        expectedNode.nodeType = "Realm";
+        expectedNode.children = expectedChildren;
 
-        Node target = new Node();
-        target.name = "service:jmx:rmi:///jndi/rmi://localhost:0/jmxrmi";
-        target.nodeType = "JVM";
-        jdp.descendantTargets.add(target);
+        assertThat(actual.getData().getEnvironmentNodes().size(), is(1));
 
-        expected.environmentNodes = List.of(jdp);
+        DiscoveryNode actualNode = actual.getData().getEnvironmentNodes().get(0);
 
-        MatcherAssert.assertThat(actual.data, Matchers.equalTo(expected));
+        assertThat(actualNode.name, is(expectedNode.name));
+        assertThat(actualNode.nodeType, is(expectedNode.nodeType));
+        assertThat(actualNode.children.size(), is(expectedNode.children.size()));
+
+        for (int i = 0; i < actualNode.children.size(); i++) {
+            DiscoveryNode actualChild = actualNode.children.get(i);
+            DiscoveryNode expectedChildNode = expectedNode.children.get(i);
+            assertThat(actualChild.name, is(expectedChildNode.name));
+            assertThat(actualChild.nodeType, is(expectedChildNode.nodeType));
+        }
     }
 
+    @Disabled
     @Test
     @Order(1)
     void testOtherContainersFound() throws Exception {
@@ -163,6 +174,7 @@ class GraphQLTest extends StandardSelfTest {
         MatcherAssert.assertThat(actual.data.targetNodes, Matchers.hasItem(ext));
     }
 
+    @Disabled
     @Test
     @Order(2)
     void testQueryForSpecificTargetWithSpecificFields() throws Exception {
@@ -190,6 +202,7 @@ class GraphQLTest extends StandardSelfTest {
         MatcherAssert.assertThat(actual.data.targetNodes, Matchers.hasItem(ext));
     }
 
+    @Disabled
     @Test
     @Order(3)
     void testStartRecordingMutationOnSpecificTarget() throws Exception {
@@ -277,6 +290,7 @@ class GraphQLTest extends StandardSelfTest {
         MatcherAssert.assertThat(actual.data, Matchers.equalTo(nodes));
     }
 
+    @Disabled
     @Test
     @Order(4)
     void testArchiveMutation() throws Exception {
@@ -314,6 +328,7 @@ class GraphQLTest extends StandardSelfTest {
                         "^es-andrewazor-demo-Main_graphql-itest_[0-9]{8}T[0-9]{6}Z\\.jfr$"));
     }
 
+    @Disabled
     @Test
     @Order(5)
     void testActiveRecordingMetadataMutation() throws Exception {
@@ -360,6 +375,7 @@ class GraphQLTest extends StandardSelfTest {
                                         "newValue"))));
     }
 
+    @Disabled
     @Test
     @Order(6)
     void testArchivedRecordingMetadataMutation() throws Exception {
@@ -407,6 +423,7 @@ class GraphQLTest extends StandardSelfTest {
                                         "newArchivedValue"))));
     }
 
+    @Disabled
     @Test
     @Order(7)
     void testDeleteMutation() throws Exception {
@@ -451,6 +468,7 @@ class GraphQLTest extends StandardSelfTest {
                         "^es-andrewazor-demo-Main_graphql-itest_[0-9]{8}T[0-9]{6}Z\\.jfr$"));
     }
 
+    /* @Disabled
     @Test
     @Order(8)
     void testNodesHaveIds() throws Exception {
@@ -481,8 +499,9 @@ class GraphQLTest extends StandardSelfTest {
                 observedIds.add(target.id);
             }
         }
-    }
+    } */
 
+    @Disabled
     @Test
     @Order(9)
     void testQueryForSpecificTargetsByNames() throws Exception {
@@ -521,6 +540,7 @@ class GraphQLTest extends StandardSelfTest {
         assertThat(targetNodes, hasItem(target2));
     }
 
+    @Disabled
     @Test
     @Order(10)
     public void testQueryForFilteredActiveRecordingsByNames() throws Exception {
@@ -653,6 +673,7 @@ class GraphQLTest extends StandardSelfTest {
                 Matchers.equalTo(0));
     }
 
+    @Disabled
     @Test
     @Order(11)
     public void shouldReturnArchivedRecordingsFilteredByNames() throws Exception {
@@ -876,6 +897,7 @@ class GraphQLTest extends StandardSelfTest {
         }
     }
 
+    /* @Disabled
     @Test
     @Order(12)
     public void testQueryforFilteredEnvironmentNodesByNames() throws Exception {
@@ -906,8 +928,9 @@ class GraphQLTest extends StandardSelfTest {
             }
         }
         Assertions.assertTrue(nameExists, "Name not found");
-    }
+    } */
 
+    @Disabled
     @Test
     @Order(13)
     void testReplaceAlwaysOnStoppedRecording() throws Exception {
@@ -932,6 +955,7 @@ class GraphQLTest extends StandardSelfTest {
         }
     }
 
+    @Disabled
     @Test
     @Order(14)
     void testReplaceNeverOnStoppedRecording() throws Exception {
@@ -959,6 +983,7 @@ class GraphQLTest extends StandardSelfTest {
         }
     }
 
+    @Disabled
     @Test
     @Order(15)
     void testReplaceStoppedOnStoppedRecording() throws Exception {
@@ -983,6 +1008,7 @@ class GraphQLTest extends StandardSelfTest {
         }
     }
 
+    @Disabled
     @ParameterizedTest
     @ValueSource(strings = {"STOPPED", "NEVER"})
     @Order(16)
@@ -1006,6 +1032,7 @@ class GraphQLTest extends StandardSelfTest {
         }
     }
 
+    @Disabled
     @Test
     @Order(17)
     void testReplaceAlwaysOnRunningRecording() throws Exception {
@@ -1025,6 +1052,7 @@ class GraphQLTest extends StandardSelfTest {
         }
     }
 
+    @Disabled
     @Test
     @Order(18)
     void testRestartTrueOnRunningRecording() throws Exception {
@@ -1044,6 +1072,7 @@ class GraphQLTest extends StandardSelfTest {
         }
     }
 
+    @Disabled
     @Test
     @Order(19)
     void testRestartFalseOnRunningRecording() throws Exception {
@@ -1066,6 +1095,7 @@ class GraphQLTest extends StandardSelfTest {
         }
     }
 
+    @Disabled
     @Test
     @Order(20)
     void testRestartTrueOnStoppedRecording() throws Exception {
@@ -1090,6 +1120,7 @@ class GraphQLTest extends StandardSelfTest {
         }
     }
 
+    @Disabled
     @Test
     @Order(21)
     void testRestartFalseOnStoppedRecording() throws Exception {
@@ -1117,6 +1148,7 @@ class GraphQLTest extends StandardSelfTest {
         }
     }
 
+    @Disabled
     @ParameterizedTest
     @ValueSource(strings = {"ALWAYS", "STOPPED", "NEVER"})
     @Order(22)
@@ -1131,6 +1163,7 @@ class GraphQLTest extends StandardSelfTest {
         }
     }
 
+    @Disabled
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
     @Order(23)
@@ -1737,12 +1770,12 @@ class GraphQLTest extends StandardSelfTest {
     }
 
     static class EnvironmentNode extends Node {
-        List<Node> descendantTargets;
+        List<Node> children;
 
         @Override
         public String toString() {
-            return "EnvironmentNode [descendantTargets="
-                    + descendantTargets
+            return "EnvironmentNode [children ="
+                    + children
                     + ", name="
                     + name
                     + ", nodeType="
@@ -1752,7 +1785,7 @@ class GraphQLTest extends StandardSelfTest {
 
         @Override
         public int hashCode() {
-            return Objects.hash(descendantTargets);
+            return Objects.hash(children);
         }
 
         @Override
@@ -1767,12 +1800,20 @@ class GraphQLTest extends StandardSelfTest {
                 return false;
             }
             EnvironmentNode other = (EnvironmentNode) obj;
-            return Objects.equals(descendantTargets, other.descendantTargets);
+            return Objects.equals(children, other.children);
         }
     }
 
-    static class EnvironmentNodes {
-        List<EnvironmentNode> environmentNodes;
+    public class EnvironmentNodes {
+        private List<EnvironmentNode> environmentNodes;
+
+        public List<EnvironmentNode> getEnvironmentNodes() {
+            return environmentNodes;
+        }
+
+        public void setEnvironmentNodes(List<EnvironmentNode> environmentNodes) {
+            this.environmentNodes = environmentNodes;
+        }
 
         @Override
         public String toString() {
@@ -1800,20 +1841,27 @@ class GraphQLTest extends StandardSelfTest {
         }
     }
 
-    static class EnvironmentNodesResponse {
-        EnvironmentNodes data;
+    public static class EnvironmentNodesResponse {
+        private Data data;
 
-        @Override
-        public String toString() {
-            return "EnvironmentNodesResponse [data=" + data + "]";
-        }
-
-        public EnvironmentNodes getData() {
+        public Data getData() {
             return data;
         }
 
-        public void setData(EnvironmentNodes data) {
+        public void setData(Data data) {
             this.data = data;
+        }
+
+        public static class Data {
+            private List<DiscoveryNode> environmentNodes;
+
+            public List<DiscoveryNode> getEnvironmentNodes() {
+                return environmentNodes;
+            }
+
+            public void setEnvironmentNodes(List<DiscoveryNode> environmentNodes) {
+                this.environmentNodes = environmentNodes;
+            }
         }
     }
 
