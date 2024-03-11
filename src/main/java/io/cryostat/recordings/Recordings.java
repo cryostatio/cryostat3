@@ -827,10 +827,25 @@ public class Recordings {
     }
 
     @POST
+    @Path("/api/beta/recordings/{connectUrl}/{filename}/upload")
+    @RolesAllowed("write")
+    public Response uploadArchivedToGrafanaBeta(
+            @RestPath String connectUrl, @RestPath String filename) throws Exception {
+        var jvmId = Target.getTargetByConnectUrl(URI.create(connectUrl)).jvmId;
+        return Response.status(RestResponse.Status.PERMANENT_REDIRECT)
+                .location(
+                        URI.create(
+                                String.format(
+                                        "/api/v3/grafana/%s",
+                                        recordingHelper.encodedKey(jvmId, filename))))
+                .build();
+    }
+
+    @POST
     @Path("/api/beta/fs/recordings/{jvmId}/{filename}/upload")
     @RolesAllowed("write")
-    public Response uploadArchivedToGrafanaBeta(@RestPath String jvmId, @RestPath String filename)
-            throws Exception {
+    public Response uploadArchivedToGrafanaFromPath(
+            @RestPath String jvmId, @RestPath String filename) throws Exception {
         return Response.status(RestResponse.Status.PERMANENT_REDIRECT)
                 .location(
                         URI.create(
