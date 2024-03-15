@@ -28,6 +28,10 @@ services:
     environment:
       QUARKUS_HTTP_HOST: "cryostat"
       QUARKUS_HTTP_PORT: ${CRYOSTAT_HTTP_PORT}
+      QUARKUS_HTTP_CORS: "true"
+      QUARKUS_HTTP_CORS_ORIGINS: /.*/
+      QUARKUS_HTTP_CORS_EXPOSED_HEADERS: x-www-authenticate,x-jmx-authenticate
+      QUARKUS_HTTP_CORS_ACCESS_CONTROL_ALLOW_CREDENTIALS: "true"
       QUARKUS_HIBERNATE_ORM_LOG_SQL: "true"
       CRYOSTAT_DISCOVERY_JDP_ENABLED: "true"
       CRYOSTAT_DISCOVERY_PODMAN_ENABLED: "true"
