@@ -36,7 +36,6 @@ import jakarta.ws.rs.Path;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
-import jakarta.ws.rs.core.Response.ResponseBuilder;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
@@ -74,23 +73,22 @@ class Health {
         checkUri(datasourceURL, "/", datasourceAvailable);
         reportsAvailable.complete(false);
 
-        return new PermittedResponseBuilder(
-                        Response.ok(
-                                Map.of(
-                                        "cryostatVersion",
-                                        String.format("v%s", version),
-                                        "dashboardConfigured",
-                                        dashboardURL.isPresent(),
-                                        "dashboardAvailable",
-                                        dashboardAvailable.join(),
-                                        "datasourceConfigured",
-                                        datasourceURL.isPresent(),
-                                        "datasourceAvailable",
-                                        datasourceAvailable.join(),
-                                        "reportsConfigured",
-                                        false,
-                                        "reportsAvailable",
-                                        false)))
+        return Response.ok(
+                        Map.of(
+                                "cryostatVersion",
+                                String.format("v%s", version),
+                                "dashboardConfigured",
+                                dashboardURL.isPresent(),
+                                "dashboardAvailable",
+                                dashboardAvailable.join(),
+                                "datasourceConfigured",
+                                datasourceURL.isPresent(),
+                                "datasourceAvailable",
+                                datasourceAvailable.join(),
+                                "reportsConfigured",
+                                false,
+                                "reportsAvailable",
+                                false))
                 .build();
     }
 
@@ -114,8 +112,7 @@ class Health {
                 dashboardExternalURL.orElseGet(
                         () -> dashboardURL.orElseThrow(() -> new BadRequestException()));
 
-        return new PermittedResponseBuilder(Response.ok(Map.of("grafanaDashboardUrl", url)))
-                .build();
+        return Response.ok(Map.of("grafanaDashboardUrl", url)).build();
     }
 
     @GET
@@ -123,10 +120,7 @@ class Health {
     @PermitAll
     @Produces({MediaType.APPLICATION_JSON})
     public Response grafanaDatasourceUrl() {
-        return new PermittedResponseBuilder(
-                        Response.ok(Map.of("grafanaDatasourceUrl", datasourceURL)))
-                .corsSkippedHeaders()
-                .build();
+        return Response.ok(Map.of("grafanaDatasourceUrl", datasourceURL)).build();
     }
 
     private void checkUri(
@@ -140,7 +134,7 @@ class Health {
                 future.complete(false);
                 return;
             }
-            logger.debugv("Testing health of {1}={2} {3}", configProperty, uri.toString(), path);
+            logger.debugv("Testing health of {0}={1} {2}", configProperty, uri.toString(), path);
             HttpRequest<Buffer> req = webClient.get(uri.getHost(), path);
             if (uri.getPort() != -1) {
                 req = req.port(uri.getPort());
@@ -160,36 +154,6 @@ class Health {
                             });
         } else {
             future.complete(false);
-        }
-    }
-
-    static class PermittedResponseBuilder {
-        private ResponseBuilder builder;
-
-        public PermittedResponseBuilder(ResponseBuilder builder) {
-            this.builder = builder;
-        }
-
-        public ResponseBuilder corsSkippedHeaders() {
-            // TODO @PermitAll annotation seems to skip the CORS filter, so these headers don't get
-            // added. We shouldn't need to add them manually like this and they should not be added
-            // in
-            // prod builds.
-            return this.builder
-                    .header("Access-Control-Allow-Origin", "http://localhost:9000")
-                    .header(
-                            "Access-Control-Allow-Headers",
-                            "accept, origin, authorization, content-type,"
-                                    + " x-requested-with, x-jmx-authorization")
-                    .header(
-                            "Access-Control-Expose-Headers",
-                            "x-www-authenticate, x-jmx-authenticate")
-                    .header("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
-                    .header("Access-Control-Allow-Credentials", "true");
-        }
-
-        public Response build() {
-            return builder.build();
         }
     }
 }
