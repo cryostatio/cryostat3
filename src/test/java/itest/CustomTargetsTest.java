@@ -16,6 +16,7 @@
 package itest;
 
 import java.net.UnknownHostException;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
@@ -224,16 +225,21 @@ public class CustomTargetsTest extends StandardSelfTest {
         MatcherAssert.assertThat(item.getString("jvmId"), Matchers.equalTo(itestJvmId));
         MatcherAssert.assertThat(item.getString("alias"), Matchers.equalTo(alias));
         MatcherAssert.assertThat(item.getString("connectUrl"), Matchers.equalTo(SELF_JMX_URL));
-        MatcherAssert.assertThat(item.getJsonObject("labels"), Matchers.equalTo(new JsonObject()));
+        MatcherAssert.assertThat(item.getJsonArray("labels"), Matchers.equalTo(new JsonArray()));
         MatcherAssert.assertThat(
                 item.getJsonObject("annotations"),
                 Matchers.equalTo(
                         new JsonObject(
                                 Map.of(
                                         "platform",
-                                        Map.of(),
+                                        List.of(),
                                         "cryostat",
-                                        Map.of("REALM", "Custom Targets")))));
+                                        List.of(
+                                                Map.of(
+                                                        "key",
+                                                        "REALM",
+                                                        "value",
+                                                        "Custom Targets"))))));
     }
 
     @Test

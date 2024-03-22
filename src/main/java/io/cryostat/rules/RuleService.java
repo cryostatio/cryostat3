@@ -15,32 +15,25 @@
  */
 package io.cryostat.rules;
 
-import java.io.IOException;
+import java.time.Duration;
 import java.util.Date;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import org.openjdk.jmc.common.unit.IConstrainedMap;
-import org.openjdk.jmc.common.unit.QuantityConversionException;
-import org.openjdk.jmc.flightrecorder.configuration.recording.RecordingOptionsBuilder;
-import org.openjdk.jmc.rjmx.ConnectionException;
-import org.openjdk.jmc.rjmx.ServiceNotAvailableException;
-
-import io.cryostat.core.net.JFRConnection;
 import io.cryostat.core.templates.Template;
 import io.cryostat.core.templates.TemplateType;
 import io.cryostat.expressions.MatchExpressionEvaluator;
 import io.cryostat.recordings.ActiveRecording;
 import io.cryostat.recordings.RecordingHelper;
+import io.cryostat.recordings.RecordingHelper.RecordingOptions;
 import io.cryostat.recordings.RecordingHelper.RecordingReplace;
 import io.cryostat.recordings.RecordingOptionsBuilderFactory;
-import io.cryostat.recordings.Recordings.Metadata;
 import io.cryostat.rules.Rule.RuleEvent;
 import io.cryostat.targets.Target;
 import io.cryostat.targets.TargetConnectionManager;
@@ -139,30 +132,22 @@ public class RuleService {
 
     @Transactional
     public void activate(Rule rule, Target target) throws Exception {
+        var options = createRecordingOptions(rule);
+
+        Pair<String, TemplateType> pair = recordingHelper.parseEventSpecifier(rule.eventSpecifier);
+        Template template =
+                recordingHelper.getPreferredTemplate(target, pair.getKey(), pair.getValue());
+
         ActiveRecording recording =
-                connectionManager.executeConnectedTask(
-                        target,
-                        connection -> {
-                            var recordingOptions = createRecordingOptions(rule, connection);
-
-                            Pair<String, TemplateType> pair =
-                                    recordingHelper.parseEventSpecifier(rule.eventSpecifier);
-                            Template template =
-                                    recordingHelper.getPreferredTemplate(
-                                            target, pair.getKey(), pair.getValue());
-
-                            Map<String, String> labels = new HashMap<>();
-                            labels.put("rule", rule.name);
-                            Metadata meta = new Metadata(labels);
-                            return recordingHelper.startRecording(
-                                    target,
-                                    recordingOptions,
-                                    template,
-                                    meta,
-                                    false,
-                                    RecordingReplace.ALWAYS,
-                                    connection);
-                        });
+                recordingHelper
+                        .startRecording(
+                                target,
+                                RecordingReplace.STOPPED,
+                                template,
+                                options,
+                                Map.of("rule", rule.name))
+                        .await()
+                        .atMost(Duration.ofSeconds(10));
         Target attachedTarget = entityManager.merge(target);
 
         var relatedRecordings = ruleRecordingMap.get(rule.id);
@@ -173,22 +158,14 @@ public class RuleService {
         }
     }
 
-    private IConstrainedMap<String> createRecordingOptions(Rule rule, JFRConnection connection)
-            throws ConnectionException,
-                    QuantityConversionException,
-                    IOException,
-                    ServiceNotAvailableException {
-        RecordingOptionsBuilder optionsBuilder =
-                recordingOptionsBuilderFactory
-                        .create(connection.getService())
-                        .name(rule.getRecordingName());
-        if (rule.maxAgeSeconds > 0) {
-            optionsBuilder.maxAge(rule.maxAgeSeconds);
-        }
-        if (rule.maxSizeBytes > 0) {
-            optionsBuilder.maxSize(rule.maxSizeBytes);
-        }
-        return optionsBuilder.build();
+    private RecordingOptions createRecordingOptions(Rule rule) {
+        return new RecordingOptions(
+                rule.getRecordingName(),
+                Optional.of(true),
+                Optional.of(true),
+                Optional.empty(),
+                Optional.ofNullable((long) rule.maxSizeBytes),
+                Optional.ofNullable((long) rule.maxAgeSeconds));
     }
 
     @Transactional

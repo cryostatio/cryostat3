@@ -91,7 +91,7 @@ class ScheduledArchiveJob implements Job {
     @Transactional
     void performArchival(ActiveRecording recording, Queue<String> previousRecordings)
             throws Exception {
-        String filename = recordingHelper.saveRecording(recording);
+        String filename = recordingHelper.archiveRecording(recording, null, null).name();
         previousRecordings.add(filename);
     }
 

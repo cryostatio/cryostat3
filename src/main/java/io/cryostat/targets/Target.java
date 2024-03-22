@@ -147,6 +147,13 @@ public class Target extends PanacheEntity {
         public Annotations() {
             this(new HashMap<>(), new HashMap<>());
         }
+
+        public Map<String, String> merged() {
+            Map<String, String> merged = new HashMap<>();
+            cryostat().entrySet().forEach((e) -> merged.put(e.getKey(), e.getValue()));
+            merged.putAll(platform());
+            return merged;
+        }
     }
 
     @Override

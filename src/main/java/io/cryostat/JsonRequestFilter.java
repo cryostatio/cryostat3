@@ -33,7 +33,8 @@ import jakarta.ws.rs.ext.Provider;
 public class JsonRequestFilter implements ContainerRequestFilter {
 
     static final Set<String> disallowedFields = Set.of("id");
-    static final Set<String> allowedPaths = Set.of("/api/v2.2/discovery");
+    static final Set<String> allowedPaths =
+            Set.of("/api/v2.2/discovery", "/api/v2.2/graphql", "/api/v3/graphql");
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
