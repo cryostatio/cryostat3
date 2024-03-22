@@ -249,7 +249,7 @@ public class RecordingHelper {
         String rename = String.format("%s-%d", desc.getName().toLowerCase(), desc.getId());
 
         RecordingOptionsBuilder recordingOptionsBuilder =
-                recordingOptionsBuilderFactory.create(connection.getService());
+                recordingOptionsBuilderFactory.create(target);
         recordingOptionsBuilder.name(rename);
 
         connection.getService().updateRecordingOptions(desc, recordingOptionsBuilder.build());

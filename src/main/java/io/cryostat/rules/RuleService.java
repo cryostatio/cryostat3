@@ -32,7 +32,6 @@ import org.openjdk.jmc.flightrecorder.configuration.recording.RecordingOptionsBu
 import org.openjdk.jmc.rjmx.ConnectionException;
 import org.openjdk.jmc.rjmx.ServiceNotAvailableException;
 
-import io.cryostat.core.net.JFRConnection;
 import io.cryostat.core.templates.Template;
 import io.cryostat.core.templates.TemplateType;
 import io.cryostat.expressions.MatchExpressionEvaluator;
@@ -143,7 +142,7 @@ public class RuleService {
                 connectionManager.executeConnectedTask(
                         target,
                         connection -> {
-                            var recordingOptions = createRecordingOptions(rule, connection);
+                            var recordingOptions = createRecordingOptions(rule, target);
 
                             Pair<String, TemplateType> pair =
                                     recordingHelper.parseEventSpecifier(rule.eventSpecifier);
@@ -173,15 +172,13 @@ public class RuleService {
         }
     }
 
-    private IConstrainedMap<String> createRecordingOptions(Rule rule, JFRConnection connection)
+    private IConstrainedMap<String> createRecordingOptions(Rule rule, Target target)
             throws ConnectionException,
                     QuantityConversionException,
                     IOException,
                     ServiceNotAvailableException {
         RecordingOptionsBuilder optionsBuilder =
-                recordingOptionsBuilderFactory
-                        .create(connection.getService())
-                        .name(rule.getRecordingName());
+                recordingOptionsBuilderFactory.create(target).name(rule.getRecordingName());
         if (rule.maxAgeSeconds > 0) {
             optionsBuilder.maxAge(rule.maxAgeSeconds);
         }

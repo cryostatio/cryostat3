@@ -17,9 +17,27 @@ package io.cryostat.recordings;
 
 import org.openjdk.jmc.common.unit.QuantityConversionException;
 import org.openjdk.jmc.flightrecorder.configuration.recording.RecordingOptionsBuilder;
-import org.openjdk.jmc.rjmx.services.jfr.IFlightRecorderService;
 
-public interface RecordingOptionsBuilderFactory {
-    RecordingOptionsBuilder create(IFlightRecorderService service)
-            throws QuantityConversionException;
+import io.cryostat.targets.Target;
+import io.cryostat.targets.TargetConnectionManager;
+
+import io.smallrye.common.annotation.Blocking;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
+
+@ApplicationScoped
+public class RecordingOptionsBuilderFactory {
+
+    @Inject RecordingOptionsCustomizerFactory customizerFactory;
+    @Inject TargetConnectionManager connectionManager;
+
+    @Blocking
+    public RecordingOptionsBuilder create(Target target) throws QuantityConversionException {
+        return connectionManager.executeConnectedTask(
+                target,
+                conn ->
+                        customizerFactory
+                                .create(target)
+                                .apply(new RecordingOptionsBuilder(conn.getService())));
+    }
 }
