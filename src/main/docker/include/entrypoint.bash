@@ -30,7 +30,6 @@ function createJmxCredentials() {
 }
 
 function importTrustStores() {
-    echo "Running as id:$(id -u) group:$(id -g)"
     if [ -z "$CONF_DIR" ]; then
         CONF_DIR="/opt/cryostat.d"
     fi
