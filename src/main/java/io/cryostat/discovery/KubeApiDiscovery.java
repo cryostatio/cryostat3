@@ -1,5 +1,6 @@
 package io.cryostat.discovery;
 
+import java.net.URI;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -13,7 +14,11 @@ import java.util.Set;
 import java.util.concurrent.ForkJoinPool;
 import java.util.stream.Collectors;
 
+import javax.management.remote.JMXServiceURL;
+
 import io.cryostat.core.sys.FileSystem;
+import io.cryostat.targets.Target;
+import io.cryostat.targets.Target.Annotations;
 import io.cryostat.targets.Target.EventKind;
 
 import com.google.common.base.Optional;
@@ -21,7 +26,9 @@ import io.fabric8.kubernetes.api.model.EndpointAddress;
 import io.fabric8.kubernetes.api.model.EndpointPort;
 import io.fabric8.kubernetes.api.model.EndpointSubset;
 import io.fabric8.kubernetes.api.model.Endpoints;
+import io.fabric8.kubernetes.api.model.HasMetadata;
 import io.fabric8.kubernetes.api.model.ObjectReference;
+import io.fabric8.kubernetes.api.model.OwnerReference;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.KubernetesClientBuilder;
 import io.fabric8.kubernetes.client.informers.ResourceEventHandler;
@@ -36,6 +43,7 @@ import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.builder.EqualsBuilder;
 import org.apache.commons.lang3.concurrent.ConcurrentException;
 import org.apache.commons.lang3.concurrent.LazyInitializer;
+import org.apache.commons.lang3.tuple.Pair;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
@@ -63,10 +71,9 @@ public class KubeApiDiscovery {
                 @Override
                 protected HashMap<String, SharedIndexInformer<Endpoints>> initialize()
                         throws ConcurrentException {
-                    // TODO add support for some wildcard indicating a single Informer for any
+                    // TODO: add support for some wildcard indicating a single Informer for any
                     // namespace that Cryostat has permissions to. This will need some restructuring
-                    // of how the
-                    // namespaces within the discovery tree are mapped.
+                    // of how the namespaces within the discovery tree are mapped.
                     var result = new HashMap<String, SharedIndexInformer<Endpoints>>();
                     kubeConfig
                             .getWatchNamespaces()
@@ -156,18 +163,135 @@ public class KubeApiDiscovery {
                 || JmxPortNumbers.or(List.of()).contains(port.getPort());
     }
 
-    private List<TargetRef> getTargetRefsFrom(Endpoints endpoints) {
-        return TargetRef.fromEndpoints(endpoints).stream()
+    private List<TargetTuple> getTargetTuplesFrom(Endpoints endpoints) {
+        return tuplesFromEndpoints(endpoints).stream()
                 .filter(
                         (ref) -> {
-                            return Objects.nonNull(ref) && isCompatiblePort(ref.port());
+                            return Objects.nonNull(ref) && isCompatiblePort(ref.port);
                         })
                 .collect(Collectors.toList());
     }
 
     @Transactional
-    public void handleEndpointEvent(TargetRef ref, EventKind eventKind) {
-        // TODO: Handle endpoint event
+    public void handleEndpointEvent(TargetTuple tuple, EventKind eventKind) {
+        DiscoveryNode realm = DiscoveryNode.getRealm(REALM).orElseThrow();
+        switch (eventKind) {
+            case FOUND:
+                DiscoveryNode nsNode =
+                        DiscoveryNode.environment(
+                                tuple.objRef.getNamespace(), KubeDiscoveryNodeType.NAMESPACE);
+                if (!realm.children.contains(nsNode)) {
+                    realm.children.add(nsNode);
+                    realm.persist();
+                } else {
+                    nsNode =
+                            DiscoveryNode.getChild(
+                                            realm, n -> tuple.objRef.getNamespace() == n.name)
+                                    .orElseThrow();
+                }
+                buildOwnerChain(nsNode, tuple);
+                break;
+            case LOST:
+                break;
+            case MODIFIED:
+                break;
+            default:
+        }
+    }
+
+    private void buildOwnerChain(DiscoveryNode nsNode, TargetTuple targetTuple) {
+        ObjectReference targetRef = targetTuple.addr.getTargetRef();
+        if (targetRef == null) {
+            logger.errorv(
+                    "Address {} for Endpoint {} had null target reference",
+                    targetTuple.addr.getIp() != null
+                            ? targetTuple.addr.getIp()
+                            : targetTuple.addr.getHostname(),
+                    targetTuple.objRef.getName());
+            return;
+        }
+        String targetKind = targetRef.getKind();
+        KubeDiscoveryNodeType targetType = KubeDiscoveryNodeType.fromKubernetesKind(targetKind);
+        Target target = targetTuple.toTarget();
+        if (targetType == KubeDiscoveryNodeType.POD) {
+            // if the Endpoint points to a Pod, chase the owner chain up as far as possible, then
+            // add that to the Namespace
+
+            Pair<HasMetadata, DiscoveryNode> pod =
+                    queryForNode(
+                            targetRef.getNamespace(), targetRef.getName(), targetRef.getKind());
+            pod.getRight()
+                    .children
+                    .add(DiscoveryNode.target(target, KubeDiscoveryNodeType.ENDPOINT));
+            pod.getRight().persist();
+
+            Pair<HasMetadata, DiscoveryNode> node = pod;
+            while (true) {
+                Pair<HasMetadata, DiscoveryNode> owner = getOrCreateOwnerNode(node);
+                if (owner == null) {
+                    break;
+                }
+                DiscoveryNode ownerNode = owner.getRight();
+                ownerNode.children.add(node.getRight());
+                ownerNode.persist();
+
+                node = owner;
+            }
+
+            nsNode.children.add(node.getRight());
+        } else {
+            // if the Endpoint points to something else(?) than a Pod, just add the target straight
+            // to the Namespace
+            nsNode.children.add(DiscoveryNode.target(target, KubeDiscoveryNodeType.ENDPOINT));
+        }
+        target.persist();
+        nsNode.persist();
+    }
+
+    private Pair<HasMetadata, DiscoveryNode> getOrCreateOwnerNode(
+            Pair<HasMetadata, DiscoveryNode> child) {
+        HasMetadata childRef = child.getLeft();
+        if (childRef == null) {
+            logger.errorv(
+                    "Could not locate node named {} of kind {} while traversing environment",
+                    child.getRight().name,
+                    child.getRight().nodeType);
+            return null;
+        }
+        List<OwnerReference> owners = childRef.getMetadata().getOwnerReferences();
+        // Take first "expected" owner Kind from NodeTypes, or if none, simply use the first owner.
+        // If there are no owners then return null to signify this and break the chain
+        if (owners.isEmpty()) {
+            return null;
+        }
+        String namespace = childRef.getMetadata().getNamespace();
+        OwnerReference owner =
+                owners.stream()
+                        .filter(o -> KubeDiscoveryNodeType.fromKubernetesKind(o.getKind()) != null)
+                        .findFirst()
+                        .orElse(owners.get(0));
+        Pair<HasMetadata, DiscoveryNode> pair =
+                queryForNode(namespace, owner.getName(), owner.getKind());
+        pair.getRight().persist();
+        return pair;
+    }
+
+    private Pair<HasMetadata, DiscoveryNode> queryForNode(
+            String namespace, String name, String kind) {
+        KubeDiscoveryNodeType nodeType = KubeDiscoveryNodeType.fromKubernetesKind(kind);
+        if (nodeType == null) {
+            return null;
+        }
+
+        HasMetadata kubeObj =
+                nodeType.getQueryFunction().apply(client()).apply(namespace).apply(name);
+        DiscoveryNode node = new DiscoveryNode();
+        node.name = name;
+        node.nodeType = nodeType.getKind();
+        node.labels = kubeObj != null ? kubeObj.getMetadata().getLabels() : new HashMap<>();
+        node.children = new ArrayList<>();
+        node.target = null;
+        return Pair.of(kubeObj, node);
     }
 
     @ApplicationScoped
@@ -217,30 +341,30 @@ public class KubeApiDiscovery {
     private final class EndpointsHandler implements ResourceEventHandler<Endpoints> {
         @Override
         public void onAdd(Endpoints endpoints) {
-            getTargetRefsFrom(endpoints)
+            getTargetTuplesFrom(endpoints)
                     .forEach(
-                            (refs) -> {
-                                handleEndpointEvent(refs, EventKind.FOUND);
+                            (tuples) -> {
+                                handleEndpointEvent(tuples, EventKind.FOUND);
                             });
         }
 
         @Override
         public void onUpdate(Endpoints oldEndpoints, Endpoints newEndpoints) {
-            Set<TargetRef> previousRefs = new HashSet<>(getTargetRefsFrom(oldEndpoints));
-            Set<TargetRef> currentRefs = new HashSet<>(getTargetRefsFrom(newEndpoints));
+            Set<TargetTuple> previousTuples = new HashSet<>(getTargetTuplesFrom(oldEndpoints));
+            Set<TargetTuple> currentTuples = new HashSet<>(getTargetTuplesFrom(newEndpoints));
 
-            if (previousRefs.equals(currentRefs)) {
+            if (previousTuples.equals(currentTuples)) {
                 return;
             }
 
-            TargetRef.compare(previousRefs).to(currentRefs).updated().stream()
-                    .forEach(ref -> handleEndpointEvent(ref, EventKind.MODIFIED));
+            TargetTuple.compare(previousTuples).to(currentTuples).updated().stream()
+                    .forEach(tuple -> handleEndpointEvent(tuple, EventKind.MODIFIED));
 
-            TargetRef.compare(previousRefs).to(currentRefs).added().stream()
-                    .forEach(ref -> handleEndpointEvent(ref, EventKind.FOUND));
+            TargetTuple.compare(previousTuples).to(currentTuples).added().stream()
+                    .forEach(tuple -> handleEndpointEvent(tuple, EventKind.FOUND));
 
-            TargetRef.compare(previousRefs).to(currentRefs).removed().stream()
-                    .forEach(ref -> handleEndpointEvent(ref, EventKind.LOST));
+            TargetTuple.compare(previousTuples).to(currentTuples).removed().stream()
+                    .forEach(tuple -> handleEndpointEvent(tuple, EventKind.LOST));
         }
 
         @Override
@@ -249,7 +373,7 @@ public class KubeApiDiscovery {
                 logger.warnv("Deleted final state unknown: {}", endpoints);
                 return;
             }
-            getTargetRefsFrom(endpoints)
+            getTargetTuplesFrom(endpoints)
                     .forEach(
                             (tt) -> {
                                 handleEndpointEvent(tt, EventKind.LOST);
@@ -257,23 +381,74 @@ public class KubeApiDiscovery {
         }
     }
 
-    static record TargetRef(ObjectReference objRef, EndpointAddress addr, EndpointPort port) {
-        TargetRef {
-            Objects.requireNonNull(objRef);
-            Objects.requireNonNull(addr);
-            Objects.requireNonNull(port);
-        }
-
-        static List<TargetRef> fromEndpoints(Endpoints endpoints) {
-            List<TargetRef> tts = new ArrayList<>();
-            for (EndpointSubset subset : endpoints.getSubsets()) {
-                for (EndpointPort port : subset.getPorts()) {
-                    for (EndpointAddress addr : subset.getAddresses()) {
-                        tts.add(new TargetRef(addr.getTargetRef(), addr, port));
-                    }
+    List<TargetTuple> tuplesFromEndpoints(Endpoints endpoints) {
+        List<TargetTuple> tts = new ArrayList<>();
+        for (EndpointSubset subset : endpoints.getSubsets()) {
+            for (EndpointPort port : subset.getPorts()) {
+                for (EndpointAddress addr : subset.getAddresses()) {
+                    tts.add(new TargetTuple(addr.getTargetRef(), addr, port));
                 }
             }
-            return tts;
+        }
+        return tts;
+    }
+
+    private class TargetTuple {
+        ObjectReference objRef;
+        EndpointAddress addr;
+        EndpointPort port;
+
+        TargetTuple(ObjectReference objRef, EndpointAddress addr, EndpointPort port) {
+            this.objRef = objRef;
+            this.addr = addr;
+            this.port = port;
+        }
+
+        public Target toTarget() {
+            Pair<HasMetadata, DiscoveryNode> pair =
+                    queryForNode(objRef.getNamespace(), objRef.getName(), objRef.getKind());
+            HasMetadata obj = pair.getLeft();
+            try {
+                String targetName = objRef.getName();
+
+                String ip = addr.getIp().replaceAll("\\.", "-");
+                String namespace = obj.getMetadata().getNamespace();
+                String host = String.format("%s.%s.pod", ip, namespace);
+
+                JMXServiceURL jmxUrl =
+                        new JMXServiceURL(
+                                "rmi",
+                                "",
+                                0,
+                                "/jndi/rmi://" + host + ':' + port.getPort() + "/jmxrmi");
+
+                Target target = new Target();
+                target.activeRecordings = new ArrayList<>();
+                target.connectUrl = URI.create(jmxUrl.toString());
+                target.alias = targetName;
+                target.labels = obj.getMetadata().getLabels();
+                target.annotations = new Annotations();
+                target.annotations.platform().putAll(obj.getMetadata().getAnnotations());
+                target.annotations
+                        .cryostat()
+                        .putAll(
+                                Map.of(
+                                        "REALM", // AnnotationKey.REALM,
+                                        REALM,
+                                        "HOST", // AnnotationKey.HOST,
+                                        addr.getIp(),
+                                        "PORT", // "AnnotationKey.PORT,
+                                        Integer.toString(port.getPort()),
+                                        "NAMESPACE",
+                                        objRef.getNamespace(),
+                                        "POD_NAME",
+                                        objRef.getName()));
+
+                return target;
+            } catch (Exception e) {
+                logger.warn("Target conversion exception", e);
+                return null;
+            }
         }
 
         @Override
@@ -284,64 +459,88 @@ public class KubeApiDiscovery {
             if (other == this) {
                 return true;
             }
-            if (!(other instanceof TargetRef)) {
+            if (!(other instanceof TargetTuple)) {
                 return false;
             }
-            TargetRef sr = (TargetRef) other;
+            TargetTuple sr = (TargetTuple) other;
             return new EqualsBuilder()
-                    .append(objRef().getName(), objRef().getName())
-                    .append(addr(), sr.addr())
-                    .append(port(), sr.port())
+                    .append(objRef.getApiVersion(), sr.objRef.getApiVersion())
+                    .append(objRef.getKind(), sr.objRef.getKind())
+                    .append(objRef.getNamespace(), sr.objRef.getNamespace())
+                    .append(objRef.getName(), sr.objRef.getName())
+                    .append(addr, sr.addr)
+                    .append(port, sr.port)
                     .build();
         }
 
-        public static Compare compare(Collection<TargetRef> src) {
+        public static Compare compare(Collection<TargetTuple> src) {
             return new Compare(src);
         }
 
         public static class Compare {
-            private Collection<TargetRef> previous, current;
+            private Collection<TargetTuple> previous, current;
 
-            public Compare(Collection<TargetRef> previous) {
+            public Compare(Collection<TargetTuple> previous) {
                 this.previous = new HashSet<>(previous);
             }
 
-            public Compare to(Collection<TargetRef> current) {
+            public Compare to(Collection<TargetTuple> current) {
                 this.current = new HashSet<>(current);
                 return this;
             }
 
-            public Collection<TargetRef> added() {
-                return removeAllUpdatedRefs(addedOrUpdatedRefs(), updated());
+            public Collection<TargetTuple> added() {
+                return removeAllUpdatedTuples(addedOrUpdatedTuples(), updated());
             }
 
-            public Collection<TargetRef> removed() {
-                return removeAllUpdatedRefs(removedOrUpdatedRefs(), updated());
+            public Collection<TargetTuple> removed() {
+                return removeAllUpdatedTuples(removedOrUpdatedTuples(), updated());
             }
 
-            public Collection<TargetRef> updated() {
-                Collection<TargetRef> updated = addedOrUpdatedRefs();
-                updated.removeAll(removedOrUpdatedRefs());
+            public Collection<TargetTuple> updated() {
+                Collection<TargetTuple> updated = addedOrUpdatedTuples();
+                intersection(removedOrUpdatedTuples(), addedOrUpdatedTuples(), false)
+                        .forEach((ref) -> updated.add(ref));
                 return updated;
             }
 
-            private Collection<TargetRef> addedOrUpdatedRefs() {
-                Collection<TargetRef> added = new HashSet<>(current);
+            private Collection<TargetTuple> addedOrUpdatedTuples() {
+                Collection<TargetTuple> added = new HashSet<>(current);
                 added.removeAll(previous);
                 return added;
             }
 
-            private Collection<TargetRef> removedOrUpdatedRefs() {
-                Collection<TargetRef> removed = new HashSet<>(previous);
+            private Collection<TargetTuple> removedOrUpdatedTuples() {
+                Collection<TargetTuple> removed = new HashSet<>(previous);
                 removed.removeAll(current);
                 return removed;
             }
 
-            private Collection<TargetRef> removeAllUpdatedRefs(
-                    Collection<TargetRef> src, Collection<TargetRef> updated) {
-                Collection<TargetRef> tnSet = new HashSet<>(src);
-                tnSet.removeAll(updated);
+            private Collection<TargetTuple> removeAllUpdatedTuples(
+                    Collection<TargetTuple> src, Collection<TargetTuple> updated) {
+                Collection<TargetTuple> tnSet = new HashSet<>(src);
+                intersection(src, updated, true).stream().forEach((ref) -> tnSet.remove(ref));
                 return tnSet;
+            }
+
+            private Collection<TargetTuple> intersection(
+                    Collection<TargetTuple> src, Collection<TargetTuple> other, boolean keepOld) {
+                final Collection<TargetTuple> intersection = new HashSet<>();
+
+                // A tuple is considered as modified if its target reference is the same
+                for (TargetTuple srcTuple : src) {
+                    for (TargetTuple otherTuple : other) {
+                        if (Objects.equals(
+                                        srcTuple.objRef.getNamespace(),
+                                        otherTuple.objRef.getNamespace())
+                                && Objects.equals(
+                                        srcTuple.objRef.getName(), otherTuple.objRef.getName())) {
+
+                            intersection.add(keepOld ? srcTuple : otherTuple);
+                        }
+                    }
+                }
+                return intersection;
             }
         }
     }
