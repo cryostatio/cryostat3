@@ -65,6 +65,9 @@ import io.cryostat.events.S3TemplateService;
 import io.cryostat.events.TargetTemplateService;
 import io.cryostat.recordings.ActiveRecording.Listener.ActiveRecordingEvent;
 import io.cryostat.recordings.ActiveRecording.Listener.ArchivedRecordingEvent;
+import io.cryostat.recordings.RecordingHelper.RecordingOptions;
+import io.cryostat.recordings.RecordingHelper.RecordingReplace;
+import io.cryostat.recordings.RecordingHelper.SnapshotCreationException;
 import io.cryostat.recordings.Recordings.ArchivedRecording;
 import io.cryostat.recordings.Recordings.LinkedRecordingDescriptor;
 import io.cryostat.recordings.Recordings.Metadata;
@@ -89,6 +92,7 @@ import jakarta.inject.Inject;
 import jakarta.inject.Named;
 import jakarta.transaction.Transactional;
 import jakarta.ws.rs.BadRequestException;
+import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.ServerErrorException;
 import jdk.jfr.RecordingState;
 import org.apache.commons.codec.binary.Base64;
@@ -109,8 +113,10 @@ import software.amazon.awssdk.services.s3.model.CreateMultipartUploadRequest;
 import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectTaggingRequest;
+import software.amazon.awssdk.services.s3.model.HeadObjectRequest;
 import software.amazon.awssdk.services.s3.model.ListObjectsV2Request;
 import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
+import software.amazon.awssdk.services.s3.model.PutObjectTaggingRequest;
 import software.amazon.awssdk.services.s3.model.S3Object;
 import software.amazon.awssdk.services.s3.model.Tag;
 import software.amazon.awssdk.services.s3.model.Tagging;
@@ -136,6 +142,7 @@ public class RecordingHelper {
     @Inject EventOptionsBuilder.Factory eventOptionsBuilderFactory;
     @Inject TargetTemplateService.Factory targetTemplateServiceFactory;
     @Inject S3TemplateService customTemplateService;
+    @Inject RecordingHelper recordingHelper;
 
     @Inject
     @Named(Producers.BASE64_URL)
@@ -557,6 +564,7 @@ public class RecordingHelper {
                                     getArchivedRecordingMetadata(jvmId, filename)
                                             .orElseGet(Metadata::empty);
                             return new ArchivedRecording(
+                                    jvmId,
                                     filename,
                                     downloadUrl(jvmId, filename),
                                     reportUrl(jvmId, filename),
@@ -595,6 +603,7 @@ public class RecordingHelper {
                                     getArchivedRecordingMetadata(jvmId, filename)
                                             .orElseGet(Metadata::empty);
                             return new ArchivedRecording(
+                                    jvmId,
                                     filename,
                                     downloadUrl(jvmId, filename),
                                     reportUrl(jvmId, filename),
@@ -733,6 +742,7 @@ public class RecordingHelper {
                     new Notification(event.category().category(), event.payload()));
         }
         return new ArchivedRecording(
+                activeRecording.target.jvmId,
                 filename,
                 downloadUrl(activeRecording.target.jvmId, filename),
                 reportUrl(activeRecording.target.jvmId, filename),
@@ -869,6 +879,7 @@ public class RecordingHelper {
                         ArchivedRecordingEvent.Payload.of(
                                 target.map(t -> t.connectUrl).orElse(null),
                                 new ArchivedRecording(
+                                        jvmId,
                                         filename,
                                         downloadUrl(jvmId, filename),
                                         reportUrl(jvmId, filename),
@@ -943,6 +954,86 @@ public class RecordingHelper {
             }
         }
         return new Metadata(labels, expiry);
+    }
+
+    @Blocking
+    public ActiveRecording updateRecordingMetadata(
+            Long recordingId, Map<String, String> newLabels) {
+        ActiveRecording recording = ActiveRecording.findById(recordingId);
+
+        if (recording == null) {
+            throw new NotFoundException("Recording not found for ID: " + recordingId);
+        }
+
+        if (!recording.metadata.labels().equals(newLabels)) {
+            Metadata updatedMetadata = new Metadata(newLabels);
+            recording.setMetadata(updatedMetadata);
+            recording.persist();
+
+            notify(
+                    new ActiveRecordingEvent(
+                            Recordings.RecordingEventCategory.METADATA_UPDATED,
+                            ActiveRecordingEvent.Payload.of(recordingHelper, recording)));
+        }
+        return recording;
+    }
+
+    private void notify(ActiveRecordingEvent event) {
+        bus.publish(
+                MessagingServer.class.getName(),
+                new Notification(event.category().category(), event.payload()));
+    }
+
+    @Blocking
+    public ArchivedRecording updateArchivedRecordingMetadata(
+            String jvmId, String filename, Map<String, String> updatedLabels) {
+        String key = archivedRecordingKey(jvmId, filename);
+        Optional<Metadata> existingMetadataOpt = getArchivedRecordingMetadata(key);
+
+        if (existingMetadataOpt.isEmpty()) {
+            throw new NotFoundException(
+                    "Could not find metadata for archived recording with key: " + key);
+        }
+
+        Metadata updatedMetadata = new Metadata(updatedLabels);
+
+        Tagging tagging = createMetadataTagging(updatedMetadata);
+        storage.putObjectTagging(
+                PutObjectTaggingRequest.builder()
+                        .bucket(archiveBucket)
+                        .key(key)
+                        .tagging(tagging)
+                        .build());
+
+        var response =
+                storage.headObject(
+                        HeadObjectRequest.builder().bucket(archiveBucket).key(key).build());
+        long size = response.contentLength();
+        Instant lastModified = response.lastModified();
+
+        ArchivedRecording updatedRecording =
+                new ArchivedRecording(
+                        jvmId,
+                        filename,
+                        downloadUrl(jvmId, filename),
+                        reportUrl(jvmId, filename),
+                        updatedMetadata,
+                        size,
+                        lastModified.getEpochSecond());
+
+        notifyArchiveMetadataUpdate(updatedRecording);
+        return updatedRecording;
+    }
+
+    private void notifyArchiveMetadataUpdate(ArchivedRecording updatedRecording) {
+        var event =
+                new ArchivedRecordingEvent(
+                        Recordings.RecordingEventCategory.METADATA_UPDATED,
+                        new ArchivedRecordingEvent.Payload(null, updatedRecording));
+        bus.publish(event.category().category(), event.payload().recording());
+        bus.publish(
+                MessagingServer.class.getName(),
+                new Notification(event.category().category(), event.payload()));
     }
 
     @Blocking

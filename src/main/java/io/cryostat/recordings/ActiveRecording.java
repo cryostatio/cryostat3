@@ -142,6 +142,10 @@ public class ActiveRecording extends PanacheEntity {
         return find("name", name).singleResult();
     }
 
+    public void setMetadata(Metadata metadata) {
+        this.metadata = metadata;
+    }
+
     @Transactional
     public static boolean deleteFromTarget(Target target, String recordingName) {
         Optional<ActiveRecording> recording =

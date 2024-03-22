@@ -17,6 +17,7 @@ package io.cryostat.graphql;
 
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -319,6 +320,41 @@ public class ActiveRecordings {
                     Optional.ofNullable(duration),
                     Optional.ofNullable(maxSize),
                     Optional.ofNullable(maxAge));
+        }
+    }
+
+    @Blocking
+    @Transactional
+    @Description(
+            "Updates the metadata labels for an existing Flight Recorder recording specified by the"
+                    + " recording ID.")
+    public Uni<ActiveRecording> doPutMetadata(
+            @Source ActiveRecording recording, MetadataLabels metadataInput) {
+        return Uni.createFrom()
+                .item(
+                        () -> {
+                            return recordingHelper.updateRecordingMetadata(
+                                    recording.id, metadataInput.getLabels());
+                        });
+    }
+
+    @SuppressFBWarnings(value = "URF_UNREAD_PUBLIC_OR_PROTECTED_FIELD")
+    public static class MetadataLabels {
+
+        private Map<String, String> labels;
+
+        public MetadataLabels() {}
+
+        public MetadataLabels(Map<String, String> labels) {
+            this.labels = new HashMap<>(labels);
+        }
+
+        public Map<String, String> getLabels() {
+            return new HashMap<>(labels);
+        }
+
+        public void setLabels(Map<String, String> labels) {
+            this.labels = new HashMap<>(labels);
         }
     }
 

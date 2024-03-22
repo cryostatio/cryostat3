@@ -20,17 +20,20 @@ import java.util.List;
 import java.util.Objects;
 import java.util.function.Predicate;
 
+import io.cryostat.graphql.ActiveRecordings.MetadataLabels;
 import io.cryostat.graphql.TargetNodes.AggregateInfo;
 import io.cryostat.graphql.TargetNodes.Recordings;
 import io.cryostat.graphql.matchers.LabelSelectorMatcher;
 import io.cryostat.recordings.RecordingHelper;
 import io.cryostat.recordings.Recordings.ArchivedRecording;
+import io.cryostat.recordings.Recordings.Metadata;
 
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import io.smallrye.common.annotation.Blocking;
 import io.smallrye.graphql.api.Nullable;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.graphql.GraphQLApi;
+import org.eclipse.microprofile.graphql.NonNull;
 import org.eclipse.microprofile.graphql.Query;
 import org.eclipse.microprofile.graphql.Source;
 
@@ -67,6 +70,31 @@ public class ArchivedRecordings {
         }
 
         return out;
+    }
+
+    @NonNull
+    public ArchivedRecording doDelete(@Source ArchivedRecording recording) {
+        recordingHelper.deleteArchivedRecording(recording.jvmId(), recording.name());
+        return recording;
+    }
+
+    @NonNull
+    public ArchivedRecording doPutMetadata(
+            @Source ArchivedRecording recording, MetadataLabels metadataInput) {
+        recordingHelper.updateArchivedRecordingMetadata(
+                recording.jvmId(), recording.name(), metadataInput.getLabels());
+
+        String downloadUrl = recordingHelper.downloadUrl(recording.jvmId(), recording.name());
+        String reportUrl = recordingHelper.reportUrl(recording.jvmId(), recording.name());
+
+        return new ArchivedRecording(
+                recording.jvmId(),
+                recording.name(),
+                downloadUrl,
+                reportUrl,
+                new Metadata(metadataInput.getLabels()),
+                recording.size(),
+                recording.archivedTime());
     }
 
     @SuppressFBWarnings(value = "URF_UNREAD_PUBLIC_OR_PROTECTED_FIELD")
