@@ -119,6 +119,7 @@ services:
       CRYOSTAT_AGENT_HARVESTER_MAX_FILES: 3
       CRYOSTAT_AGENT_HARVESTER_EXIT_MAX_AGE_MS: 60000
       CRYOSTAT_AGENT_HARVESTER_EXIT_MAX_SIZE_B: 153600 # "$(echo 1024*150 | bc)"
+      CRYOSTAT_AGENT_API_WRITES_ENABLED: "true"
     restart: always
     healthcheck:
       test: curl --fail http://localhost:10010 || exit 1

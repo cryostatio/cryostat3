@@ -223,7 +223,7 @@ public class RecordingHelper {
         IRecordingDescriptor desc =
                 connection
                         .getService()
-                        .start(recordingOptions, enableEvents(target, eventTemplate));
+                        .start(recordingOptions, eventTemplate.getName(), eventTemplate.getType());
 
         Map<String, String> labels = metadata.labels();
         labels.put("template.name", eventTemplate.getName());

@@ -25,7 +25,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.Set;
 
 import org.openjdk.jmc.rjmx.services.jfr.IRecordingDescriptor;
 
@@ -102,7 +101,7 @@ public class Target extends PanacheEntity {
 
     @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     public boolean isAgent() {
-        return Set.of("http", "https", "cryostat-agent").contains(connectUrl.getScheme());
+        return AgentConnection.isAgentConnection(connectUrl);
     }
 
     @JsonIgnore
@@ -215,7 +214,10 @@ public class Target extends PanacheEntity {
                                     .persist();
                         }
                     } catch (Exception e) {
-                        logger.error("Failure to synchronize existing target recording state", e);
+                        logger.errorv(
+                                e,
+                                "Failure to synchronize existing target recording state for {0}",
+                                target.connectUrl);
                     }
                     break;
                 default:

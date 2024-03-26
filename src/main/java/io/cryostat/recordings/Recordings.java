@@ -577,7 +577,7 @@ public class Recordings {
             @RestForm Optional<String> replace,
             // restart param is deprecated, only 'replace' should be used and takes priority if both
             // are provided
-            @RestForm Optional<Boolean> restart,
+            @Deprecated @RestForm Optional<Boolean> restart,
             @RestForm Optional<Long> duration,
             @RestForm Optional<Boolean> toDisk,
             @RestForm Optional<Long> maxAge,

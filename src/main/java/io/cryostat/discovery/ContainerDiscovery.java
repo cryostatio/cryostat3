@@ -251,16 +251,14 @@ public abstract class ContainerDiscovery {
                                                     item.body(),
                                                     new TypeReference<List<ContainerSpec>>() {}));
                                 } catch (JsonProcessingException e) {
-                                    logger.error("Json processing error");
+                                    logger.error("Json processing error", e);
                                 }
                             },
                             failure -> {
-                                logger.error(
-                                        String.format("%s API request failed", getRealm()),
-                                        failure);
+                                logger.errorv(failure, "{0} API request failed", getRealm());
                             });
         } catch (JsonProcessingException e) {
-            logger.error("Json processing error");
+            logger.error("Json processing error", e);
         }
     }
 
@@ -279,13 +277,12 @@ public abstract class ContainerDiscovery {
                                 result.complete(
                                         mapper.readValue(item.body(), ContainerDetails.class));
                             } catch (JsonProcessingException e) {
-                                logger.error("Json processing error");
+                                logger.error("Json processing error", e);
                                 result.completeExceptionally(e);
                             }
                         },
                         failure -> {
-                            logger.error(
-                                    String.format("%s API request failed", getRealm()), failure);
+                            logger.errorv(failure, "{0} API request failed", getRealm());
                             result.completeExceptionally(failure);
                         });
         return result;
@@ -322,7 +319,7 @@ public abstract class ContainerDiscovery {
                                         .Hostname;
                     } catch (InterruptedException | TimeoutException | ExecutionException e) {
                         containers.remove(desc);
-                        logger.warn(String.format("Invalid %s target observed", getRealm()), e);
+                        logger.warnv(e, "Invalid {0} target observed", getRealm());
                         return;
                     }
                 }
@@ -331,7 +328,7 @@ public abstract class ContainerDiscovery {
             connectUrl = URI.create(serviceUrl.toString());
         } catch (MalformedURLException | URISyntaxException e) {
             containers.remove(desc);
-            logger.warn(String.format("Invalid %s target observed", getRealm()), e);
+            logger.warnv(e, "Invalid {0} target observed", getRealm());
             return;
         }
 
