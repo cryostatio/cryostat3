@@ -44,9 +44,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import org.openjdk.jmc.common.unit.IConstrainedMap;
-import org.openjdk.jmc.flightrecorder.configuration.events.EventOptionID;
 import org.openjdk.jmc.flightrecorder.configuration.recording.RecordingOptionsBuilder;
-import org.openjdk.jmc.rjmx.services.jfr.IEventTypeInfo;
 import org.openjdk.jmc.rjmx.services.jfr.IRecordingDescriptor;
 
 import io.cryostat.ConfigProperties;
@@ -358,46 +356,6 @@ public class RecordingHelper {
             return Pair.of(templateName, templateType);
         }
         throw new BadRequestException(eventSpecifier);
-    }
-
-    @Blocking
-    private IConstrainedMap<EventOptionID> enableAllEvents(Target target) throws Exception {
-        return connectionManager.executeConnectedTask(
-                target,
-                connection -> {
-                    EventOptionsBuilder builder = eventOptionsBuilderFactory.create(connection);
-
-                    for (IEventTypeInfo eventTypeInfo :
-                            connection.getService().getAvailableEventTypes()) {
-                        builder.addEvent(
-                                eventTypeInfo.getEventTypeID().getFullKey(), "enabled", "true");
-                    }
-
-                    return builder.build();
-                });
-    }
-
-    @Blocking
-    private IConstrainedMap<EventOptionID> enableEvents(Target target, Template eventTemplate)
-            throws Exception {
-        if (EventTemplates.ALL_EVENTS_TEMPLATE.equals(eventTemplate)) {
-            return enableAllEvents(target);
-        }
-        switch (eventTemplate.getType()) {
-            case TARGET:
-                return targetTemplateServiceFactory
-                        .create(target)
-                        .getEvents(eventTemplate.getName(), eventTemplate.getType())
-                        .orElseThrow();
-            case CUSTOM:
-                return customTemplateService
-                        .getEvents(eventTemplate.getName(), eventTemplate.getType())
-                        .orElseThrow();
-            default:
-                throw new BadRequestException(
-                        String.format(
-                                "Invalid/unknown event template %s", eventTemplate.getName()));
-        }
     }
 
     @Blocking
