@@ -54,6 +54,7 @@ import io.quarkus.runtime.StartupEvent;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Observes;
 import jakarta.inject.Inject;
+import jakarta.persistence.NoResultException;
 import jakarta.transaction.Transactional;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.builder.EqualsBuilder;
@@ -216,6 +217,8 @@ public class KubeApiDiscovery {
                 }
                 break;
             default:
+                logger.warnv("Unknown discovery event {0}", eventKind);
+                break;
         }
     }
 
@@ -234,7 +237,12 @@ public class KubeApiDiscovery {
         String targetKind = TargetTuple.getKind();
         KubeDiscoveryNodeType targetType = KubeDiscoveryNodeType.fromKubernetesKind(targetKind);
 
-        Target target = Target.getTargetByConnectUrl(targetTuple.toTarget().connectUrl);
+        Target target;
+        try {
+            target = Target.getTargetByConnectUrl(targetTuple.toTarget().connectUrl);
+        } catch (NoResultException e) {
+            return;
+        }
 
         DiscoveryNode targetNode = target.discoveryNode;
 
@@ -444,11 +452,11 @@ public class KubeApiDiscovery {
                 return;
             }
 
-            TargetTuple.compare(previousTuples).to(currentTuples).added().stream()
-                    .forEach(tuple -> handleEndpointEvent(tuple, EventKind.FOUND));
-
             TargetTuple.compare(previousTuples).to(currentTuples).removed().stream()
                     .forEach(tuple -> handleEndpointEvent(tuple, EventKind.LOST));
+
+            TargetTuple.compare(previousTuples).to(currentTuples).added().stream()
+                    .forEach(tuple -> handleEndpointEvent(tuple, EventKind.FOUND));
         }
 
         @Override
@@ -523,11 +531,11 @@ public class KubeApiDiscovery {
                         .cryostat()
                         .putAll(
                                 Map.of(
-                                        "REALM", // AnnotationKey.REALM,
+                                        "REALM",
                                         REALM,
-                                        "HOST", // AnnotationKey.HOST,
+                                        "HOST",
                                         addr.getIp(),
-                                        "PORT", // "AnnotationKey.PORT,
+                                        "PORT",
                                         Integer.toString(port.getPort()),
                                         "NAMESPACE",
                                         objRef.getNamespace(),
@@ -558,8 +566,8 @@ public class KubeApiDiscovery {
                     .append(objRef.getKind(), sr.objRef.getKind())
                     .append(objRef.getNamespace(), sr.objRef.getNamespace())
                     .append(objRef.getName(), sr.objRef.getName())
-                    .append(addr, sr.addr)
-                    .append(port, sr.port)
+                    .append(addr.getIp(), sr.addr.getIp())
+                    .append(port.getPort(), sr.port.getPort())
                     .build();
         }
 
