@@ -10,6 +10,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ForkJoinPool;
 import java.util.stream.Collectors;
@@ -17,11 +18,11 @@ import java.util.stream.Collectors;
 import javax.management.remote.JMXServiceURL;
 
 import io.cryostat.core.sys.FileSystem;
+import io.cryostat.discovery.KubeApiDiscovery.KubeConfig;
 import io.cryostat.targets.Target;
 import io.cryostat.targets.Target.Annotations;
 import io.cryostat.targets.Target.EventKind;
 
-import com.google.common.base.Optional;
 import io.fabric8.kubernetes.api.model.EndpointAddress;
 import io.fabric8.kubernetes.api.model.EndpointPort;
 import io.fabric8.kubernetes.api.model.EndpointSubset;
@@ -159,8 +160,8 @@ public class KubeApiDiscovery {
     }
 
     private boolean isCompatiblePort(EndpointPort port) {
-        return JmxPortNames.or(List.of()).contains(port.getName())
-                || JmxPortNumbers.or(List.of()).contains(port.getPort());
+        return JmxPortNames.orElse(List.of()).contains(port.getName())
+                || JmxPortNumbers.orElse(List.of()).contains(port.getPort());
     }
 
     private List<TargetTuple> getTargetTuplesFrom(Endpoints endpoints) {
@@ -175,33 +176,37 @@ public class KubeApiDiscovery {
     @Transactional
     public void handleEndpointEvent(TargetTuple tuple, EventKind eventKind) {
         DiscoveryNode realm = DiscoveryNode.getRealm(REALM).orElseThrow();
+        DiscoveryNode nsNode =
+                DiscoveryNode.environment(
+                        tuple.objRef.getNamespace(), KubeDiscoveryNodeType.NAMESPACE);
+        if (realm.children.contains(nsNode)) {
+            nsNode =
+                    DiscoveryNode.getChild(realm, n -> tuple.objRef.getNamespace() == n.name)
+                            .orElseThrow();
+        }
+
         switch (eventKind) {
             case FOUND:
-                DiscoveryNode nsNode =
-                        DiscoveryNode.environment(
-                                tuple.objRef.getNamespace(), KubeDiscoveryNodeType.NAMESPACE);
+                buildOwnerChain(nsNode, tuple);
                 if (!realm.children.contains(nsNode)) {
                     realm.children.add(nsNode);
                     realm.persist();
-                } else {
-                    nsNode =
-                            DiscoveryNode.getChild(
-                                            realm, n -> tuple.objRef.getNamespace() == n.name)
-                                    .orElseThrow();
                 }
-                buildOwnerChain(nsNode, tuple);
                 break;
             case LOST:
-                break;
-            case MODIFIED:
+                pruneOwnerChain(nsNode, tuple);
+                if (nsNode.children.isEmpty()) {
+                    realm.children.remove(nsNode);
+                    realm.persist();
+                }
                 break;
             default:
         }
     }
 
-    private void buildOwnerChain(DiscoveryNode nsNode, TargetTuple targetTuple) {
-        ObjectReference targetRef = targetTuple.addr.getTargetRef();
-        if (targetRef == null) {
+    private void pruneOwnerChain(DiscoveryNode nsNode, TargetTuple targetTuple) {
+        ObjectReference TargetTuple = targetTuple.addr.getTargetRef();
+        if (TargetTuple == null) {
             logger.errorv(
                     "Address {} for Endpoint {} had null target reference",
                     targetTuple.addr.getIp() != null
@@ -210,24 +215,81 @@ public class KubeApiDiscovery {
                     targetTuple.objRef.getName());
             return;
         }
-        String targetKind = targetRef.getKind();
+
+        String targetKind = TargetTuple.getKind();
         KubeDiscoveryNodeType targetType = KubeDiscoveryNodeType.fromKubernetesKind(targetKind);
+
+        Target target = Target.getTargetByConnectUrl(targetTuple.toTarget().connectUrl);
+        target.delete();
+
+        DiscoveryNode targetNode = target.discoveryNode;
+
+        if (targetType == KubeDiscoveryNodeType.POD) {
+            Pair<HasMetadata, DiscoveryNode> pod =
+                    queryForNode(
+                            TargetTuple.getNamespace(),
+                            TargetTuple.getName(),
+                            TargetTuple.getKind());
+
+            pod.getRight().children.remove(targetNode);
+            pod.getRight().persist();
+
+            Pair<HasMetadata, DiscoveryNode> node = pod;
+            while (true) {
+                Pair<HasMetadata, DiscoveryNode> owner = getOwnerNode(node);
+                if (owner == null) {
+                    break;
+                }
+                DiscoveryNode ownerNode = owner.getRight();
+                if (node.getRight().children.isEmpty()) {
+                    ownerNode.children.remove(node.getRight());
+                    ownerNode.persist();
+                }
+                node = owner;
+            }
+        } else {
+            nsNode.children.remove(targetNode);
+        }
+
+        nsNode.persist();
+    }
+
+    private void buildOwnerChain(DiscoveryNode nsNode, TargetTuple targetTuple) {
+        ObjectReference TargetTuple = targetTuple.addr.getTargetRef();
+        if (TargetTuple == null) {
+            logger.errorv(
+                    "Address {} for Endpoint {} had null target reference",
+                    targetTuple.addr.getIp() != null
+                            ? targetTuple.addr.getIp()
+                            : targetTuple.addr.getHostname(),
+                    targetTuple.objRef.getName());
+            return;
+        }
+
+        String targetKind = TargetTuple.getKind();
+        KubeDiscoveryNodeType targetType = KubeDiscoveryNodeType.fromKubernetesKind(targetKind);
+
         Target target = targetTuple.toTarget();
+        DiscoveryNode targetNode = DiscoveryNode.target(target, KubeDiscoveryNodeType.ENDPOINT);
+        target.discoveryNode = targetNode;
+        target.persist();
+
         if (targetType == KubeDiscoveryNodeType.POD) {
             // if the Endpoint points to a Pod, chase the owner chain up as far as possible, then
             // add that to the Namespace
 
             Pair<HasMetadata, DiscoveryNode> pod =
                     queryForNode(
-                            targetRef.getNamespace(), targetRef.getName(), targetRef.getKind());
-            pod.getRight()
-                    .children
-                    .add(DiscoveryNode.target(target, KubeDiscoveryNodeType.ENDPOINT));
+                            TargetTuple.getNamespace(),
+                            TargetTuple.getName(),
+                            TargetTuple.getKind());
+
+            pod.getRight().children.add(targetNode);
             pod.getRight().persist();
 
             Pair<HasMetadata, DiscoveryNode> node = pod;
             while (true) {
-                Pair<HasMetadata, DiscoveryNode> owner = getOrCreateOwnerNode(node);
+                Pair<HasMetadata, DiscoveryNode> owner = getOwnerNode(node);
                 if (owner == null) {
                     break;
                 }
@@ -242,14 +304,13 @@ public class KubeApiDiscovery {
         } else {
             // if the Endpoint points to something else(?) than a Pod, just add the target straight
             // to the Namespace
-            nsNode.children.add(DiscoveryNode.target(target, KubeDiscoveryNodeType.ENDPOINT));
+            nsNode.children.add(targetNode);
         }
-        target.persist();
+
         nsNode.persist();
     }
 
-    private Pair<HasMetadata, DiscoveryNode> getOrCreateOwnerNode(
-            Pair<HasMetadata, DiscoveryNode> child) {
+    private Pair<HasMetadata, DiscoveryNode> getOwnerNode(Pair<HasMetadata, DiscoveryNode> child) {
         HasMetadata childRef = child.getLeft();
         if (childRef == null) {
             logger.errorv(
@@ -270,10 +331,7 @@ public class KubeApiDiscovery {
                         .filter(o -> KubeDiscoveryNodeType.fromKubernetesKind(o.getKind()) != null)
                         .findFirst()
                         .orElse(owners.get(0));
-        Pair<HasMetadata, DiscoveryNode> pair =
-                queryForNode(namespace, owner.getName(), owner.getKind());
-        pair.getRight().persist();
-        return pair;
+        return queryForNode(namespace, owner.getName(), owner.getKind());
     }
 
     private Pair<HasMetadata, DiscoveryNode> queryForNode(
@@ -285,13 +343,31 @@ public class KubeApiDiscovery {
 
         HasMetadata kubeObj =
                 nodeType.getQueryFunction().apply(client()).apply(namespace).apply(name);
-        DiscoveryNode node = new DiscoveryNode();
-        node.name = name;
-        node.nodeType = nodeType.getKind();
-        node.labels = kubeObj != null ? kubeObj.getMetadata().getLabels() : new HashMap<>();
-        node.children = new ArrayList<>();
-        node.target = null;
-        return Pair.of(kubeObj, node);
+
+        Optional<DiscoveryNode> node =
+                DiscoveryNode.getNode(
+                        n -> {
+                            return name.equals(n.name)
+                                    && namespace.equals(n.labels.get("cryostat.io/namespace"));
+                        });
+
+        return Pair.of(
+                kubeObj,
+                node.orElseGet(
+                        () -> {
+                            DiscoveryNode newNode = new DiscoveryNode();
+                            newNode.name = name;
+                            newNode.nodeType = nodeType.getKind();
+                            newNode.children = new ArrayList<>();
+                            newNode.target = null;
+                            newNode.labels =
+                                    kubeObj != null
+                                            ? kubeObj.getMetadata().getLabels()
+                                            : new HashMap<>();
+                            // Add namespace to label to retrieve node later
+                            newNode.labels.put("cryostat.io/namespace", namespace);
+                            return newNode;
+                        }));
     }
 
     @ApplicationScoped
@@ -311,7 +387,7 @@ public class KubeApiDiscovery {
         private KubernetesClient kubeClient;
 
         List<String> getWatchNamespaces() {
-            return watchNamespaces.or(List.of());
+            return watchNamespaces.orElse(List.of());
         }
 
         String getOwnNamespace() {
@@ -356,9 +432,6 @@ public class KubeApiDiscovery {
             if (previousTuples.equals(currentTuples)) {
                 return;
             }
-
-            TargetTuple.compare(previousTuples).to(currentTuples).updated().stream()
-                    .forEach(tuple -> handleEndpointEvent(tuple, EventKind.MODIFIED));
 
             TargetTuple.compare(previousTuples).to(currentTuples).added().stream()
                     .forEach(tuple -> handleEndpointEvent(tuple, EventKind.FOUND));
@@ -413,7 +486,13 @@ public class KubeApiDiscovery {
 
                 String ip = addr.getIp().replaceAll("\\.", "-");
                 String namespace = obj.getMetadata().getNamespace();
-                String host = String.format("%s.%s.pod", ip, namespace);
+
+                boolean isPod = obj.getKind() == KubeDiscoveryNodeType.POD.getKind();
+
+                String host = String.format("%s.%s", ip, namespace);
+                if (isPod) {
+                    host = String.format("%s.pod", host);
+                }
 
                 JMXServiceURL jmxUrl =
                         new JMXServiceURL(
@@ -441,7 +520,7 @@ public class KubeApiDiscovery {
                                         Integer.toString(port.getPort()),
                                         "NAMESPACE",
                                         objRef.getNamespace(),
-                                        "POD_NAME",
+                                        isPod ? "POD_NAME" : "OBJECT_NAME",
                                         objRef.getName()));
 
                 return target;
@@ -490,57 +569,15 @@ public class KubeApiDiscovery {
             }
 
             public Collection<TargetTuple> added() {
-                return removeAllUpdatedTuples(addedOrUpdatedTuples(), updated());
-            }
-
-            public Collection<TargetTuple> removed() {
-                return removeAllUpdatedTuples(removedOrUpdatedTuples(), updated());
-            }
-
-            public Collection<TargetTuple> updated() {
-                Collection<TargetTuple> updated = addedOrUpdatedTuples();
-                intersection(removedOrUpdatedTuples(), addedOrUpdatedTuples(), false)
-                        .forEach((ref) -> updated.add(ref));
-                return updated;
-            }
-
-            private Collection<TargetTuple> addedOrUpdatedTuples() {
                 Collection<TargetTuple> added = new HashSet<>(current);
                 added.removeAll(previous);
                 return added;
             }
 
-            private Collection<TargetTuple> removedOrUpdatedTuples() {
+            public Collection<TargetTuple> removed() {
                 Collection<TargetTuple> removed = new HashSet<>(previous);
                 removed.removeAll(current);
                 return removed;
-            }
-
-            private Collection<TargetTuple> removeAllUpdatedTuples(
-                    Collection<TargetTuple> src, Collection<TargetTuple> updated) {
-                Collection<TargetTuple> tnSet = new HashSet<>(src);
-                intersection(src, updated, true).stream().forEach((ref) -> tnSet.remove(ref));
-                return tnSet;
-            }
-
-            private Collection<TargetTuple> intersection(
-                    Collection<TargetTuple> src, Collection<TargetTuple> other, boolean keepOld) {
-                final Collection<TargetTuple> intersection = new HashSet<>();
-
-                // A tuple is considered as modified if its target reference is the same
-                for (TargetTuple srcTuple : src) {
-                    for (TargetTuple otherTuple : other) {
-                        if (Objects.equals(
-                                        srcTuple.objRef.getNamespace(),
-                                        otherTuple.objRef.getNamespace())
-                                && Objects.equals(
-                                        srcTuple.objRef.getName(), otherTuple.objRef.getName())) {
-
-                            intersection.add(keepOld ? srcTuple : otherTuple);
-                        }
-                    }
-                }
-                return intersection;
             }
         }
     }
