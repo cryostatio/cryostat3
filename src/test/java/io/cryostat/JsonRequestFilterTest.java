@@ -22,6 +22,7 @@ import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.stream.Stream;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.ws.rs.container.ContainerRequestContext;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
@@ -38,6 +39,7 @@ public class JsonRequestFilterTest {
     @BeforeEach
     void setUp() {
         filter = new JsonRequestFilter();
+        filter.objectMapper = new ObjectMapper();
         requestContext = mock(ContainerRequestContext.class);
     }
 
