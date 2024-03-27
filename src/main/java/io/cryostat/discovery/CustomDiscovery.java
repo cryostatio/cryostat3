@@ -73,7 +73,7 @@ public class CustomDiscovery {
         DiscoveryNode universe = DiscoveryNode.getUniverse();
         if (DiscoveryNode.getRealm(REALM).isEmpty()) {
             DiscoveryPlugin plugin = new DiscoveryPlugin();
-            DiscoveryNode node = DiscoveryNode.environment(REALM, DiscoveryNode.REALM);
+            DiscoveryNode node = DiscoveryNode.environment(REALM, BaseNodeType.REALM);
             plugin.realm = node;
             plugin.builtin = true;
             universe.children.add(node);
@@ -162,7 +162,7 @@ public class CustomDiscovery {
             target.annotations = new Annotations();
             target.annotations.cryostat().putAll(Map.of("REALM", REALM));
 
-            DiscoveryNode node = DiscoveryNode.target(target);
+            DiscoveryNode node = DiscoveryNode.target(target, BaseNodeType.JVM);
             target.discoveryNode = node;
             DiscoveryNode realm = DiscoveryNode.getRealm(REALM).orElseThrow();
 

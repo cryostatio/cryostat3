@@ -164,18 +164,19 @@ public abstract class ContainerDiscovery {
                     getClass().getName(), socketPath);
             return;
         }
-        logger.infov("{0} started", getClass().getName());
 
         DiscoveryNode universe = DiscoveryNode.getUniverse();
         if (DiscoveryNode.getRealm(getRealm()).isEmpty()) {
             DiscoveryPlugin plugin = new DiscoveryPlugin();
-            DiscoveryNode node = DiscoveryNode.environment(getRealm(), DiscoveryNode.REALM);
+            DiscoveryNode node = DiscoveryNode.environment(getRealm(), BaseNodeType.REALM);
             plugin.realm = node;
             plugin.builtin = true;
             universe.children.add(node);
             plugin.persist();
             universe.persist();
         }
+
+        logger.info(String.format("Starting %s client", getRealm()));
 
         queryContainers();
         this.timerId = vertx.setPeriodic(pollPeriod.toMillis(), unused -> queryContainers());
@@ -355,11 +356,12 @@ public abstract class ContainerDiscovery {
                                     "PORT", // "AnnotationKey.PORT,
                                     Integer.toString(jmxPort)));
 
-            DiscoveryNode node = DiscoveryNode.target(target);
+            DiscoveryNode node = DiscoveryNode.target(target, BaseNodeType.JVM);
             target.discoveryNode = node;
             String podName = desc.PodName;
             if (StringUtils.isNotBlank(podName)) {
-                DiscoveryNode pod = DiscoveryNode.environment(podName, DiscoveryNode.POD);
+                DiscoveryNode pod =
+                        DiscoveryNode.environment(podName, ContainerDiscoveryNodeType.POD);
                 if (!realm.children.contains(pod)) {
                     pod.children.add(node);
                     realm.children.add(pod);
@@ -369,7 +371,9 @@ public abstract class ContainerDiscovery {
                                             realm,
                                             n ->
                                                     podName.equals(n.name)
-                                                            && DiscoveryNode.POD.equals(n.nodeType))
+                                                            && ContainerDiscoveryNodeType.POD
+                                                                    .getKind()
+                                                                    .equals(n.nodeType))
                                     .orElseThrow();
                     pod.children.add(node);
                 }
@@ -384,7 +388,8 @@ public abstract class ContainerDiscovery {
             Target t = Target.getTargetByConnectUrl(connectUrl);
             String podName = desc.PodName;
             if (StringUtils.isNotBlank(podName)) {
-                DiscoveryNode pod = DiscoveryNode.environment(podName, DiscoveryNode.POD);
+                DiscoveryNode pod =
+                        DiscoveryNode.environment(podName, ContainerDiscoveryNodeType.POD);
                 pod.children.remove(t.discoveryNode);
             } else {
                 realm.children.remove(t.discoveryNode);

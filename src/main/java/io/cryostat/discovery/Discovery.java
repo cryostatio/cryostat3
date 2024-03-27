@@ -126,7 +126,7 @@ public class Discovery {
 
         DiscoveryPlugin plugin = new DiscoveryPlugin();
         plugin.callback = callbackUri;
-        plugin.realm = DiscoveryNode.environment(realmName, DiscoveryNode.REALM);
+        plugin.realm = DiscoveryNode.environment(realmName, BaseNodeType.REALM);
         plugin.builtin = false;
         plugin.persist();
 
