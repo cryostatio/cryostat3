@@ -239,10 +239,10 @@ public class RecordingHelper {
 
         logger.tracev("Started recording: {0} {1}", target.connectUrl, target.activeRecordings);
 
-        if (desc.getDuration().longValue() > 0) {
+        if (!recording.continuous) {
             scheduler.schedule(
                     () -> stopRecording(recording, archiveOnStop),
-                    desc.getDuration().longValue(),
+                    recording.duration,
                     TimeUnit.MILLISECONDS);
         }
 
