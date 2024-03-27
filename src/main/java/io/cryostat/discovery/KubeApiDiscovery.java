@@ -104,7 +104,7 @@ public class KubeApiDiscovery {
                                                                 ENDPOINTS_INFORMER_RESYNC_PERIOD));
                                         logger.infov(
                                                 "Started Endpoints SharedInformer for"
-                                                        + " namespace \"{}\"",
+                                                        + " namespace \"{0}\"",
                                                 ns);
                                     });
                     return result;
@@ -133,7 +133,7 @@ public class KubeApiDiscovery {
             universe.persist();
         }
 
-        logger.infov("Starting %s client", REALM);
+        logger.infov("Starting {0} client", REALM);
 
         safeGetInformers(); // trigger lazy init
     }
@@ -143,7 +143,7 @@ public class KubeApiDiscovery {
             return;
         }
 
-        logger.infov("Shutting down %s client", REALM);
+        logger.infov("Shutting down {0} client", REALM);
     }
 
     boolean enabled() {
@@ -223,7 +223,7 @@ public class KubeApiDiscovery {
         ObjectReference TargetTuple = targetTuple.addr.getTargetRef();
         if (TargetTuple == null) {
             logger.errorv(
-                    "Address {} for Endpoint {} had null target reference",
+                    "Address {0} for Endpoint {1} had null target reference",
                     targetTuple.addr.getIp() != null
                             ? targetTuple.addr.getIp()
                             : targetTuple.addr.getHostname(),
@@ -235,7 +235,6 @@ public class KubeApiDiscovery {
         KubeDiscoveryNodeType targetType = KubeDiscoveryNodeType.fromKubernetesKind(targetKind);
 
         Target target = Target.getTargetByConnectUrl(targetTuple.toTarget().connectUrl);
-        target.delete();
 
         DiscoveryNode targetNode = target.discoveryNode;
 
@@ -265,7 +264,7 @@ public class KubeApiDiscovery {
         } else {
             nsNode.children.remove(targetNode);
         }
-
+        target.delete();
         nsNode.persist();
     }
 
@@ -273,7 +272,7 @@ public class KubeApiDiscovery {
         ObjectReference targetRef = targetTuple.addr.getTargetRef();
         if (targetRef == null) {
             logger.errorv(
-                    "Address {} for Endpoint {} had null target reference",
+                    "Address {0} for Endpoint {1} had null target reference",
                     targetTuple.addr.getIp() != null
                             ? targetTuple.addr.getIp()
                             : targetTuple.addr.getHostname(),
@@ -327,9 +326,8 @@ public class KubeApiDiscovery {
         HasMetadata childRef = child.getLeft();
         if (childRef == null) {
             logger.errorv(
-                    "Could not locate node named {} of kind {} while traversing environment",
-                    child.getRight().name,
-                    child.getRight().nodeType);
+                    "Could not locate node named {0} of kind {1} while traversing environment",
+                    child.getRight().name, child.getRight().nodeType);
             return null;
         }
         List<OwnerReference> owners = childRef.getMetadata().getOwnerReferences();
@@ -456,7 +454,7 @@ public class KubeApiDiscovery {
         @Override
         public void onDelete(Endpoints endpoints, boolean deletedFinalStateUnknown) {
             if (deletedFinalStateUnknown) {
-                logger.warnv("Deleted final state unknown: {}", endpoints);
+                logger.warnv("Deleted final state unknown: {0}", endpoints);
                 return;
             }
             getTargetTuplesFrom(endpoints)
@@ -500,7 +498,7 @@ public class KubeApiDiscovery {
                 String ip = addr.getIp().replaceAll("\\.", "-");
                 String namespace = obj.getMetadata().getNamespace();
 
-                boolean isPod = obj.getKind() == KubeDiscoveryNodeType.POD.getKind();
+                boolean isPod = obj.getKind().equals(KubeDiscoveryNodeType.POD.getKind());
 
                 String host = String.format("%s.%s", ip, namespace);
                 if (isPod) {
