@@ -18,7 +18,7 @@
 
     <io.cryostat.core.version>2.30.1</io.cryostat.core.version>
 
-    <org.apache.commons.codec.version>1.16.0</org.apache.commons.codec.version>
+    <org.apache.commons.codec.version>1.16.1</org.apache.commons.codec.version>
     <org.apache.commons.io.version>2.13.0</org.apache.commons.io.version>
     <org.apache.httpcomponents.version>5.2.1</org.apache.httpcomponents.version>
     <org.apache.commons.lang3.version>3.13.0</org.apache.commons.lang3.version>
