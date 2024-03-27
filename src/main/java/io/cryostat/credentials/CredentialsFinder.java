@@ -76,9 +76,7 @@ public class CredentialsFinder {
 
     @Blocking
     public Optional<Credential> getCredentialsForConnectUrl(URI connectUrl) {
-        return Target.find("connectUrl", connectUrl)
-                .<Target>firstResultOptional()
-                .map(this::getCredentialsForTarget)
-                .orElse(Optional.empty());
+        return getCredentialsForTarget(
+                Target.find("connectUrl", connectUrl).<Target>singleResult());
     }
 }
