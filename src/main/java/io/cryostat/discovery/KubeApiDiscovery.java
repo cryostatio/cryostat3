@@ -255,8 +255,8 @@ public class KubeApiDiscovery {
     }
 
     private void buildOwnerChain(DiscoveryNode nsNode, TargetTuple targetTuple) {
-        ObjectReference TargetTuple = targetTuple.addr.getTargetRef();
-        if (TargetTuple == null) {
+        ObjectReference targetRef = targetTuple.addr.getTargetRef();
+        if (targetRef == null) {
             logger.errorv(
                     "Address {} for Endpoint {} had null target reference",
                     targetTuple.addr.getIp() != null
@@ -266,7 +266,7 @@ public class KubeApiDiscovery {
             return;
         }
 
-        String targetKind = TargetTuple.getKind();
+        String targetKind = targetRef.getKind();
         KubeDiscoveryNodeType targetType = KubeDiscoveryNodeType.fromKubernetesKind(targetKind);
 
         Target target = targetTuple.toTarget();
@@ -280,9 +280,7 @@ public class KubeApiDiscovery {
 
             Pair<HasMetadata, DiscoveryNode> pod =
                     queryForNode(
-                            TargetTuple.getNamespace(),
-                            TargetTuple.getName(),
-                            TargetTuple.getKind());
+                            targetRef.getNamespace(), targetRef.getName(), targetRef.getKind());
 
             pod.getRight().children.add(targetNode);
             pod.getRight().persist();
