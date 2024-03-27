@@ -28,7 +28,7 @@
     <org.testcontainers.bom.version>1.19.7</org.testcontainers.bom.version>
     <quarkus.platform.artifact-id>quarkus-bom</quarkus.platform.artifact-id>
     <quarkus.platform.group-id>io.quarkus.platform</quarkus.platform.group-id>
-    <quarkus.platform.version>3.2.6.Final</quarkus.platform.version>
+    <quarkus.platform.version>3.9.1</quarkus.platform.version>
     <quarkus-quinoa.version>2.3.6</quarkus-quinoa.version>
     <org.codehaus.mojo.build.helper.plugin.version>3.5.0</org.codehaus.mojo.build.helper.plugin.version>
 
