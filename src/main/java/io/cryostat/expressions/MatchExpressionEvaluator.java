@@ -100,19 +100,16 @@ public class MatchExpressionEvaluator {
     }
 
     void invalidate(String matchExpression) {
+        var cache = cacheManager.getCache(CACHE_NAME).orElseThrow();
         // 0-index is important here. the argument order of the load() method determines the
         // composite key order
-        cacheManager
-                .getCache(CACHE_NAME)
-                .ifPresent(
-                        c ->
-                                c.invalidateIf(
-                                        k ->
-                                                Objects.equals(
-                                                        (String)
-                                                                ((CompositeCacheKey) k)
-                                                                        .getKeyElements()[0],
-                                                        matchExpression)));
+        cache.invalidateIf(
+                        k ->
+                                Objects.equals(
+                                        (String) ((CompositeCacheKey) k).getKeyElements()[0],
+                                        matchExpression))
+                .subscribe()
+                .with((v) -> {}, logger::warn);
     }
 
     public boolean applies(MatchExpression matchExpression, Target target) throws ScriptException {

@@ -20,11 +20,15 @@ import java.util.Optional;
 
 import io.cryostat.expressions.MatchExpressionEvaluator;
 import io.cryostat.targets.Target;
+import io.cryostat.targets.Target.EventKind;
+import io.cryostat.targets.Target.TargetDiscovery;
 
+import io.quarkus.vertx.ConsumeEvent;
 import io.smallrye.common.annotation.Blocking;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import jakarta.transaction.Transactional;
+import org.apache.commons.collections4.BidiMap;
+import org.apache.commons.collections4.bidimap.DualHashBidiMap;
 import org.jboss.logging.Logger;
 import org.projectnessie.cel.tools.ScriptException;
 
@@ -34,24 +38,43 @@ public class CredentialsFinder {
     @Inject MatchExpressionEvaluator expressionEvaluator;
     @Inject Logger logger;
 
+    private final BidiMap<Target, Credential> cache = new DualHashBidiMap<>();
+
     @Blocking
-    @Transactional
-    public Optional<Credential> getCredentialsForTarget(Target target) {
-        return Credential.<Credential>listAll().stream()
-                .filter(
-                        c -> {
-                            try {
-                                return expressionEvaluator.applies(c.matchExpression, target);
-                            } catch (ScriptException e) {
-                                logger.error(e);
-                                return false;
-                            }
-                        })
-                .findFirst();
+    @ConsumeEvent(Credential.CREDENTIALS_DELETED)
+    void onCredentialsDeleted(Credential credential) {
+        cache.removeValue(credential);
+    }
+
+    @ConsumeEvent(Target.TARGET_JVM_DISCOVERY)
+    void onMessage(TargetDiscovery event) {
+        if (EventKind.LOST.equals(event.kind())) {
+            cache.remove(event.serviceRef());
+        }
     }
 
     @Blocking
-    @Transactional
+    public Optional<Credential> getCredentialsForTarget(Target target) {
+        return Optional.ofNullable(
+                cache.computeIfAbsent(
+                        target,
+                        t ->
+                                Credential.<Credential>listAll().stream()
+                                        .filter(
+                                                c -> {
+                                                    try {
+                                                        return expressionEvaluator.applies(
+                                                                c.matchExpression, t);
+                                                    } catch (ScriptException e) {
+                                                        logger.error(e);
+                                                        return false;
+                                                    }
+                                                })
+                                        .findFirst()
+                                        .orElse(null)));
+    }
+
+    @Blocking
     public Optional<Credential> getCredentialsForConnectUrl(URI connectUrl) {
         return Target.find("connectUrl", connectUrl)
                 .<Target>firstResultOptional()
