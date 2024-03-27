@@ -22,7 +22,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.UUID;
 
 import org.openjdk.jmc.common.unit.IConstrainedMap;
 import org.openjdk.jmc.common.unit.IConstraint;
@@ -59,7 +58,6 @@ import io.vertx.mutiny.ext.web.client.WebClient;
 import io.vertx.mutiny.ext.web.codec.BodyCodec;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import jakarta.transaction.Transactional;
 import jakarta.ws.rs.ForbiddenException;
 import jdk.jfr.RecordingState;
 import org.apache.commons.lang3.StringUtils;
@@ -183,7 +181,6 @@ public class AgentClient {
     }
 
     Uni<Void> updateRecordingOptions(long id, IConstrainedMap<String> newSettings) {
-        var u = UUID.randomUUID();
         Map<String, Object> settings = new HashMap<>(newSettings.keySet().size());
         for (String key : newSettings.keySet()) {
             Object value = newSettings.get(key);
@@ -195,7 +192,6 @@ public class AgentClient {
             }
             settings.put(key, value);
         }
-        logger.infov("connection task {0} issuing update {1} to {2}", u, settings, getUri());
 
         try {
             return invoke(
@@ -206,8 +202,6 @@ public class AgentClient {
                     .map(
                             resp -> {
                                 int statusCode = resp.statusCode();
-                                logger.infov(
-                                        "connection task {0} response HTTP {1}", u, statusCode);
                                 if (HttpStatusCodeIdentifier.isSuccessCode(statusCode)) {
                                     return null;
                                 } else if (statusCode == 403) {
@@ -388,10 +382,9 @@ public class AgentClient {
         return invoke(mtd, path, null, codec);
     }
 
-    @Transactional
     private <T> Uni<HttpResponse<T>> invoke(
             HttpMethod mtd, String path, Buffer payload, BodyCodec<T> codec) {
-        logger.infov("{0} {1} {2}", mtd, getUri(), path);
+        logger.debugv("{0} {1} {2}", mtd, getUri(), path);
         HttpRequest<T> req =
                 webClient
                         .request(mtd, getUri().getPort(), getUri().getHost(), path)
