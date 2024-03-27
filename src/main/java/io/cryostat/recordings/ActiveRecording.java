@@ -18,6 +18,7 @@ package io.cryostat.recordings;
 import java.net.URI;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.UUID;
 
 import org.openjdk.jmc.common.unit.UnitLookup;
 import org.openjdk.jmc.rjmx.services.jfr.IRecordingDescriptor;
@@ -237,6 +238,10 @@ public class ActiveRecording extends PanacheEntity {
         public void preRemove(ActiveRecording activeRecording) throws Exception {
             try {
                 activeRecording.target.activeRecordings.remove(activeRecording);
+                var id = UUID.randomUUID();
+                logger.infov(
+                        "task {0} deleting {1} {2}",
+                        id, activeRecording.target.connectUrl, activeRecording.name);
                 connectionManager.executeConnectedTask(
                         activeRecording.target,
                         conn -> {
@@ -246,18 +251,31 @@ public class ActiveRecording extends PanacheEntity {
                             // and close the actual recording, because the target probably went
                             // offline or we otherwise just can't reach it.
                             try {
+                                logger.infov(
+                                        "task {0} executing {1} {2} deletion",
+                                        id,
+                                        activeRecording.target.connectUrl,
+                                        activeRecording.name);
                                 RecordingHelper.getDescriptor(conn, activeRecording)
                                         .ifPresent(
                                                 rec ->
                                                         Recordings.safeCloseRecording(
                                                                 conn, rec, logger));
                             } catch (Exception e) {
-                                logger.info(e);
+                                logger.warnv(
+                                        e,
+                                        "Failed to close target {0} active recording {1}",
+                                        activeRecording.target.connectUrl,
+                                        activeRecording.name);
                             }
                             return null;
                         });
             } catch (Exception e) {
-                logger.error(e);
+                logger.errorv(
+                        e,
+                        "Failed to delete active recording {0} from target {1}",
+                        activeRecording.name,
+                        activeRecording.target.connectUrl);
                 throw e;
             }
         }

@@ -22,6 +22,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 
 import org.openjdk.jmc.common.unit.IConstrainedMap;
 import org.openjdk.jmc.common.unit.IConstraint;
@@ -180,7 +181,8 @@ public class AgentClient {
         }
     }
 
-    Uni<Integer> updateRecordingOptions(long id, IConstrainedMap<String> newSettings) {
+    Uni<Void> updateRecordingOptions(long id, IConstrainedMap<String> newSettings) {
+        var u = UUID.randomUUID();
         Map<String, Object> settings = new HashMap<>(newSettings.keySet().size());
         for (String key : newSettings.keySet()) {
             Object value = newSettings.get(key);
@@ -192,6 +194,7 @@ public class AgentClient {
             }
             settings.put(key, value);
         }
+        logger.infov("connection task {0} issuing update {1} to {2}", u, settings, getUri());
 
         try {
             return invoke(
@@ -202,8 +205,10 @@ public class AgentClient {
                     .map(
                             resp -> {
                                 int statusCode = resp.statusCode();
+                                logger.infov(
+                                        "connection task {0} response HTTP {1}", u, statusCode);
                                 if (HttpStatusCodeIdentifier.isSuccessCode(statusCode)) {
-                                    return 0;
+                                    return null;
                                 } else if (statusCode == 403) {
                                     throw new ForbiddenException(
                                             new UnsupportedOperationException(
@@ -234,7 +239,7 @@ public class AgentClient {
                         });
     }
 
-    Uni<Integer> stopRecording(long id) {
+    Uni<Void> stopRecording(long id) {
         // FIXME this is a terrible hack, the interfaces here should not require only an
         // IConstrainedMap with IOptionDescriptors but allow us to pass other and more simply
         // serializable data to the Agent, such as this recording state entry
@@ -273,7 +278,7 @@ public class AgentClient {
         return updateRecordingOptions(id, map);
     }
 
-    Uni<Integer> deleteRecording(long id) {
+    Uni<Void> deleteRecording(long id) {
         return invoke(
                         HttpMethod.DELETE,
                         String.format("/recordings/%d", id),
@@ -283,7 +288,7 @@ public class AgentClient {
                         resp -> {
                             int statusCode = resp.statusCode();
                             if (HttpStatusCodeIdentifier.isSuccessCode(statusCode)) {
-                                return 0;
+                                return null;
                             } else if (statusCode == 403) {
                                 throw new ForbiddenException(
                                         new UnsupportedOperationException("deleteRecording"));
