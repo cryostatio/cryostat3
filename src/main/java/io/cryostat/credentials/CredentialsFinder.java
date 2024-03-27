@@ -21,8 +21,10 @@ import java.util.Optional;
 import io.cryostat.expressions.MatchExpressionEvaluator;
 import io.cryostat.targets.Target;
 
+import io.smallrye.common.annotation.Blocking;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import jakarta.transaction.Transactional;
 import org.jboss.logging.Logger;
 import org.projectnessie.cel.tools.ScriptException;
 
@@ -32,6 +34,8 @@ public class CredentialsFinder {
     @Inject MatchExpressionEvaluator expressionEvaluator;
     @Inject Logger logger;
 
+    @Blocking
+    @Transactional
     public Optional<Credential> getCredentialsForTarget(Target target) {
         return Credential.<Credential>listAll().stream()
                 .filter(
@@ -46,6 +50,8 @@ public class CredentialsFinder {
                 .findFirst();
     }
 
+    @Blocking
+    @Transactional
     public Optional<Credential> getCredentialsForConnectUrl(URI connectUrl) {
         return Target.find("connectUrl", connectUrl)
                 .<Target>firstResultOptional()

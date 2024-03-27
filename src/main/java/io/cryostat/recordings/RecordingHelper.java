@@ -39,6 +39,8 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -83,7 +85,9 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Observes;
 import jakarta.inject.Inject;
 import jakarta.inject.Named;
+import jakarta.transaction.Transactional;
 import jakarta.ws.rs.BadRequestException;
+import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.ServerErrorException;
 import jdk.jfr.RecordingState;
 import org.apache.commons.codec.binary.Base64;
@@ -131,6 +135,7 @@ public class RecordingHelper {
     @Inject EventOptionsBuilder.Factory eventOptionsBuilderFactory;
     @Inject TargetTemplateService.Factory targetTemplateServiceFactory;
     @Inject S3TemplateService customTemplateService;
+    @Inject ScheduledExecutorService scheduler;
 
     @Inject
     @Named(Producers.BASE64_URL)
@@ -211,11 +216,9 @@ public class RecordingHelper {
                             if (!restart) {
                                 throw new EntityExistsException("Recording", recordingName);
                             }
-                            if (!ActiveRecording.deleteFromTarget(target, recordingName)) {
-                                logger.warnf(
-                                        "Could not delete recording %s from target %s",
-                                        recordingName, target.alias);
-                            }
+                            target.activeRecordings.stream()
+                                    .filter(r -> r.name.equals(recordingName))
+                                    .forEach(this::deleteRecording);
                         });
 
         IRecordingDescriptor desc =
@@ -235,6 +238,13 @@ public class RecordingHelper {
         target.persist();
 
         logger.tracev("Started recording: {0} {1}", target.connectUrl, target.activeRecordings);
+
+        if (desc.getDuration().longValue() > 0) {
+            scheduler.schedule(
+                    () -> stopRecording(recording, archiveOnStop),
+                    desc.getDuration().longValue(),
+                    TimeUnit.MILLISECONDS);
+        }
 
         return recording;
     }
@@ -326,6 +336,56 @@ public class RecordingHelper {
         }
     }
 
+    @Blocking
+    @Transactional
+    public ActiveRecording stopRecording(ActiveRecording recording, boolean archive) {
+        return connectionManager.executeConnectedTask(
+                recording.target,
+                conn -> {
+                    var desc = getDescriptorById(conn, recording.remoteId);
+                    if (desc.isEmpty()) {
+                        throw new NotFoundException();
+                    }
+                    if (!desc.get()
+                            .getState()
+                            .equals(
+                                    org.openjdk.jmc.rjmx.services.jfr.IRecordingDescriptor
+                                            .RecordingState.STOPPED)) {
+                        conn.getService().stop(desc.get());
+                    }
+                    recording.state = RecordingState.STOPPED;
+                    recording.persist();
+                    if (archive) {
+                        saveRecording(recording);
+                    }
+                    return recording;
+                });
+    }
+
+    @Blocking
+    @Transactional
+    public ActiveRecording stopRecording(ActiveRecording recording) {
+        return stopRecording(recording, false);
+    }
+
+    @Blocking
+    @Transactional
+    public ActiveRecording deleteRecording(ActiveRecording recording) {
+        return connectionManager.executeConnectedTask(
+                recording.target,
+                conn -> {
+                    var desc = getDescriptorById(conn, recording.remoteId);
+                    if (desc.isEmpty()) {
+                        throw new NotFoundException();
+                    }
+                    conn.getService().close(desc.get());
+                    recording.target.activeRecordings.remove(recording);
+                    recording.target.persist();
+                    recording.delete();
+                    return recording;
+                });
+    }
+
     public LinkedRecordingDescriptor toExternalForm(ActiveRecording recording) {
         return new LinkedRecordingDescriptor(
                 recording.id,
@@ -406,8 +466,8 @@ public class RecordingHelper {
         }
     }
 
-    static Optional<IRecordingDescriptor> getDescriptorById(
-            JFRConnection connection, long remoteId) {
+    @Blocking
+    Optional<IRecordingDescriptor> getDescriptorById(JFRConnection connection, long remoteId) {
         try {
             return connection.getService().getAvailableRecordings().stream()
                     .filter(r -> remoteId == r.getId())
@@ -417,12 +477,14 @@ public class RecordingHelper {
         }
     }
 
-    static Optional<IRecordingDescriptor> getDescriptor(
+    @Blocking
+    Optional<IRecordingDescriptor> getDescriptor(
             JFRConnection connection, ActiveRecording activeRecording) {
         return getDescriptorById(connection, activeRecording.remoteId);
     }
 
-    public static Optional<IRecordingDescriptor> getDescriptorByName(
+    @Blocking
+    public Optional<IRecordingDescriptor> getDescriptorByName(
             JFRConnection connection, String recordingName) {
         try {
             return connection.getService().getAvailableRecordings().stream()
@@ -713,6 +775,17 @@ public class RecordingHelper {
         }
 
         return read;
+    }
+
+    @Blocking
+    void safeCloseRecording(JFRConnection conn, IRecordingDescriptor rec) {
+        try {
+            conn.getService().close(rec);
+        } catch (org.openjdk.jmc.rjmx.services.jfr.FlightRecorderException e) {
+            logger.error("Failed to stop remote recording", e);
+        } catch (Exception e) {
+            logger.error("Unexpected exception", e);
+        }
     }
 
     /* Archived Recording Helpers */

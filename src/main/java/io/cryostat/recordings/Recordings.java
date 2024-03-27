@@ -29,7 +29,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -37,7 +36,6 @@ import java.util.regex.Pattern;
 import org.openjdk.jmc.common.unit.IConstrainedMap;
 import org.openjdk.jmc.common.unit.IOptionDescriptor;
 import org.openjdk.jmc.flightrecorder.configuration.recording.RecordingOptionsBuilder;
-import org.openjdk.jmc.rjmx.services.jfr.FlightRecorderException;
 import org.openjdk.jmc.rjmx.services.jfr.IFlightRecorderService;
 import org.openjdk.jmc.rjmx.services.jfr.IRecordingDescriptor;
 
@@ -47,7 +45,6 @@ import io.cryostat.StorageBuckets;
 import io.cryostat.V2Response;
 import io.cryostat.core.EventOptionsBuilder;
 import io.cryostat.core.RecordingOptionsCustomizer;
-import io.cryostat.core.net.JFRConnection;
 import io.cryostat.core.sys.Clock;
 import io.cryostat.core.templates.Template;
 import io.cryostat.core.templates.TemplateType;
@@ -120,7 +117,6 @@ public class Recordings {
     @Inject StorageBuckets storageBuckets;
     @Inject S3Presigner presigner;
     @Inject RemoteRecordingInputStreamFactory remoteRecordingStreamFactory;
-    @Inject ScheduledExecutorService scheduler;
     @Inject ObjectMapper mapper;
     @Inject RecordingHelper recordingHelper;
     @Inject Logger logger;
@@ -460,8 +456,7 @@ public class Recordings {
         ActiveRecording activeRecording = recording.get();
         switch (body.toLowerCase()) {
             case "stop":
-                activeRecording.state = RecordingState.STOPPED;
-                activeRecording.persist();
+                recordingHelper.stopRecording(activeRecording);
                 return null;
             case "save":
                 try {
@@ -491,7 +486,7 @@ public class Recordings {
         Target target = Target.getTargetByConnectUrl(connectUrl);
         Optional<IRecordingDescriptor> recording =
                 connectionManager.executeConnectedTask(
-                        target, conn -> RecordingHelper.getDescriptorByName(conn, recordingName));
+                        target, conn -> recordingHelper.getDescriptorByName(conn, recordingName));
         if (recording.isEmpty()) {
             throw new NotFoundException();
         }
@@ -643,33 +638,9 @@ public class Recordings {
                                     connection);
                         });
 
-        if (recording.duration > 0) {
-            scheduler.schedule(
-                    () -> stopRecording(recording.id, archiveOnStop.orElse(false)),
-                    recording.duration,
-                    TimeUnit.MILLISECONDS);
-        }
-
         return Response.status(Response.Status.CREATED)
                 .entity(recordingHelper.toExternalForm(recording))
                 .build();
-    }
-
-    @Transactional
-    void stopRecording(long id, boolean archive) {
-        ActiveRecording.<ActiveRecording>findByIdOptional(id)
-                .ifPresent(
-                        recording -> {
-                            try {
-                                recording.state = RecordingState.STOPPED;
-                                recording.persist();
-                                if (archive) {
-                                    recordingHelper.saveRecording(recording);
-                                }
-                            } catch (Exception e) {
-                                logger.error("couldn't update recording", e);
-                            }
-                        });
     }
 
     @POST
@@ -719,14 +690,11 @@ public class Recordings {
     @RolesAllowed("write")
     public void deleteRecording(@RestPath long targetId, @RestPath long remoteId) throws Exception {
         Target target = Target.find("id", targetId).singleResult();
-        target.activeRecordings.stream()
-                .filter(r -> r.remoteId == remoteId)
-                .findFirst()
-                .ifPresentOrElse(
-                        ActiveRecording::delete,
-                        () -> {
-                            throw new NotFoundException();
-                        });
+        var recording = target.getRecordingById(remoteId);
+        if (recording == null) {
+            throw new NotFoundException();
+        }
+        recordingHelper.deleteRecording(recording);
     }
 
     @DELETE
@@ -786,16 +754,6 @@ public class Recordings {
             throw new HttpException(
                     resp.sdkHttpResponse().statusCode(),
                     resp.sdkHttpResponse().statusText().orElse(""));
-        }
-    }
-
-    static void safeCloseRecording(JFRConnection conn, IRecordingDescriptor rec, Logger logger) {
-        try {
-            conn.getService().close(rec);
-        } catch (FlightRecorderException e) {
-            logger.error("Failed to stop remote recording", e);
-        } catch (Exception e) {
-            logger.error("Unexpected exception", e);
         }
     }
 

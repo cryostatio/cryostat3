@@ -31,13 +31,14 @@ import jakarta.inject.Inject;
 public class RemoteRecordingInputStreamFactory {
 
     @Inject TargetConnectionManager connectionManager;
+    @Inject RecordingHelper recordingHelper;
 
     public ProgressInputStream open(ActiveRecording recording) throws Exception {
         return connectionManager.executeConnectedTask(
                 recording.target,
                 conn -> {
                     IRecordingDescriptor desc =
-                            RecordingHelper.getDescriptor(conn, recording).orElseThrow();
+                            recordingHelper.getDescriptor(conn, recording).orElseThrow();
                     return open(conn, recording.target, desc);
                 });
     }

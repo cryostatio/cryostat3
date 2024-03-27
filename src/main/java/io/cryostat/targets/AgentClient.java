@@ -59,6 +59,7 @@ import io.vertx.mutiny.ext.web.client.WebClient;
 import io.vertx.mutiny.ext.web.codec.BodyCodec;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import jakarta.transaction.Transactional;
 import jakarta.ws.rs.ForbiddenException;
 import jdk.jfr.RecordingState;
 import org.apache.commons.lang3.StringUtils;
@@ -387,6 +388,7 @@ public class AgentClient {
         return invoke(mtd, path, null, codec);
     }
 
+    @Transactional
     private <T> Uni<HttpResponse<T>> invoke(
             HttpMethod mtd, String path, Buffer payload, BodyCodec<T> codec) {
         logger.infov("{0} {1} {2}", mtd, getUri(), path);

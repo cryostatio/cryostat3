@@ -50,6 +50,7 @@ import io.cryostat.core.net.CryostatFlightRecorderService;
 import io.cryostat.core.templates.TemplateService;
 import io.cryostat.core.templates.TemplateType;
 
+import io.smallrye.common.annotation.Blocking;
 import io.smallrye.mutiny.Uni;
 import io.vertx.mutiny.core.buffer.Buffer;
 import org.jboss.logging.Logger;
@@ -80,6 +81,7 @@ class AgentJFRService implements CryostatFlightRecorderService {
         return "agent"; // TODO
     }
 
+    @Blocking
     @Override
     public void close(IRecordingDescriptor descriptor) throws FlightRecorderException {
         client.deleteRecording(descriptor.getId()).await().atMost(Duration.ofSeconds(10));
@@ -90,6 +92,7 @@ class AgentJFRService implements CryostatFlightRecorderService {
         throw new UnimplementedException();
     }
 
+    @Blocking
     @Override
     public Collection<? extends IEventTypeInfo> getAvailableEventTypes()
             throws FlightRecorderException {
@@ -102,11 +105,13 @@ class AgentJFRService implements CryostatFlightRecorderService {
         return KnownRecordingOptions.DESCRIPTORS_BY_KEY_V2;
     }
 
+    @Blocking
     @Override
     public List<IRecordingDescriptor> getAvailableRecordings() throws FlightRecorderException {
         return client.activeRecordings().await().atMost(Duration.ofSeconds(10));
     }
 
+    @Blocking
     @Override
     public IConstrainedMap<EventOptionID> getCurrentEventTypeSettings()
             throws FlightRecorderException {
@@ -132,11 +137,13 @@ class AgentJFRService implements CryostatFlightRecorderService {
         return new DefaultValueMap<>(Map.of());
     }
 
+    @Blocking
     @Override
     public List<String> getServerTemplates() throws FlightRecorderException {
         return client.eventTemplates().await().atMost(Duration.ofSeconds(10));
     }
 
+    @Blocking
     @Override
     public IRecordingDescriptor getSnapshotRecording() throws FlightRecorderException {
         return client.startSnapshot().await().atMost(Duration.ofSeconds(10));
@@ -153,6 +160,7 @@ class AgentJFRService implements CryostatFlightRecorderService {
         return true;
     }
 
+    @Blocking
     @Override
     public InputStream openStream(IRecordingDescriptor descriptor, boolean removeOnClose)
             throws FlightRecorderException {
@@ -185,6 +193,7 @@ class AgentJFRService implements CryostatFlightRecorderService {
         throw new UnimplementedException();
     }
 
+    @Blocking
     @Override
     public void stop(IRecordingDescriptor descriptor) throws FlightRecorderException {
         client.stopRecording(descriptor.getId()).await().atMost(Duration.ofSeconds(10));
@@ -197,6 +206,7 @@ class AgentJFRService implements CryostatFlightRecorderService {
         throw new UnimplementedException();
     }
 
+    @Blocking
     @Override
     public void updateRecordingOptions(
             IRecordingDescriptor descriptor, IConstrainedMap<String> newSettings)
@@ -206,6 +216,7 @@ class AgentJFRService implements CryostatFlightRecorderService {
                 .atMost(Duration.ofSeconds(10));
     }
 
+    @Blocking
     @Override
     public IRecordingDescriptor start(
             IConstrainedMap<String> recordingOptions,

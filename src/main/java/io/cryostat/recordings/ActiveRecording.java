@@ -18,7 +18,6 @@ package io.cryostat.recordings;
 import java.net.URI;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.UUID;
 
 import org.openjdk.jmc.common.unit.UnitLookup;
 import org.openjdk.jmc.rjmx.services.jfr.IRecordingDescriptor;
@@ -48,7 +47,6 @@ import jakarta.persistence.PreRemove;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
-import jakarta.transaction.Transactional;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.PositiveOrZero;
@@ -143,27 +141,6 @@ public class ActiveRecording extends PanacheEntity {
         return find("name", name).singleResult();
     }
 
-    @Transactional
-    public static boolean deleteFromTarget(Target target, String recordingName) {
-        Optional<ActiveRecording> recording =
-                target.activeRecordings.stream()
-                        .filter(r -> r.name.equals(recordingName))
-                        .findFirst();
-        boolean found = recording.isPresent();
-        if (found) {
-            Logger.getLogger(ActiveRecording.class)
-                    .debugv("Found and deleting match: {0} / {1}", target.alias, recording.get());
-            recording.get().delete();
-            getEntityManager().flush();
-        } else {
-            Logger.getLogger(ActiveRecording.class)
-                    .debugv(
-                            "No match found for recording {0} in target {1}",
-                            recordingName, target.alias);
-        }
-        return found;
-    }
-
     @ApplicationScoped
     static class Listener {
 
@@ -190,7 +167,8 @@ public class ActiveRecording extends PanacheEntity {
                     connectionManager.executeConnectedTask(
                             activeRecording.target,
                             conn -> {
-                                RecordingHelper.getDescriptorById(conn, activeRecording.remoteId)
+                                recordingHelper
+                                        .getDescriptorById(conn, activeRecording.remoteId)
                                         .ifPresent(
                                                 d -> {
                                                     // this connection can fail if we are removing
@@ -209,7 +187,7 @@ public class ActiveRecording extends PanacheEntity {
                                                             conn.getService().stop(d);
                                                         }
                                                     } catch (Exception e) {
-                                                        throw new RuntimeException(e);
+                                                        logger.debug(e);
                                                     }
                                                 });
                                 return null;
@@ -238,10 +216,6 @@ public class ActiveRecording extends PanacheEntity {
         public void preRemove(ActiveRecording activeRecording) throws Exception {
             try {
                 activeRecording.target.activeRecordings.remove(activeRecording);
-                var id = UUID.randomUUID();
-                logger.infov(
-                        "task {0} deleting {1} {2}",
-                        id, activeRecording.target.connectUrl, activeRecording.name);
                 connectionManager.executeConnectedTask(
                         activeRecording.target,
                         conn -> {
@@ -251,18 +225,14 @@ public class ActiveRecording extends PanacheEntity {
                             // and close the actual recording, because the target probably went
                             // offline or we otherwise just can't reach it.
                             try {
-                                logger.infov(
-                                        "task {0} executing {1} {2} deletion",
-                                        id,
-                                        activeRecording.target.connectUrl,
-                                        activeRecording.name);
-                                RecordingHelper.getDescriptor(conn, activeRecording)
+                                recordingHelper
+                                        .getDescriptor(conn, activeRecording)
                                         .ifPresent(
                                                 rec ->
-                                                        Recordings.safeCloseRecording(
-                                                                conn, rec, logger));
+                                                        recordingHelper.safeCloseRecording(
+                                                                conn, rec));
                             } catch (Exception e) {
-                                logger.warnv(
+                                logger.debugv(
                                         e,
                                         "Failed to close target {0} active recording {1}",
                                         activeRecording.target.connectUrl,
@@ -271,12 +241,11 @@ public class ActiveRecording extends PanacheEntity {
                             return null;
                         });
             } catch (Exception e) {
-                logger.errorv(
+                logger.debugv(
                         e,
                         "Failed to delete active recording {0} from target {1}",
                         activeRecording.name,
                         activeRecording.target.connectUrl);
-                throw e;
             }
         }
 
