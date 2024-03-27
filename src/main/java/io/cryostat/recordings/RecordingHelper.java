@@ -135,6 +135,7 @@ public class RecordingHelper {
     @Inject EventOptionsBuilder.Factory eventOptionsBuilderFactory;
     @Inject TargetTemplateService.Factory targetTemplateServiceFactory;
     @Inject S3TemplateService customTemplateService;
+    // FIXME replace this with Quartz
     @Inject ScheduledExecutorService scheduler;
 
     @Inject
@@ -237,11 +238,9 @@ public class RecordingHelper {
         target.activeRecordings.add(recording);
         target.persist();
 
-        logger.tracev("Started recording: {0} {1}", target.connectUrl, target.activeRecordings);
-
         if (!recording.continuous) {
             scheduler.schedule(
-                    () -> stopRecording(recording, archiveOnStop),
+                    () -> stopRecording(recording.id, archiveOnStop),
                     recording.duration,
                     TimeUnit.MILLISECONDS);
         }
@@ -334,6 +333,15 @@ public class RecordingHelper {
             default:
                 return true;
         }
+    }
+
+    @Blocking
+    @Transactional
+    public ActiveRecording stopRecording(long recordingId, boolean archive) {
+        // look up the recording by ID to ensure it is an attached entity reference. This is used
+        // because this method is invoked from a background scheduler thread, so it is not part of
+        // the usual persistence context.
+        return stopRecording(ActiveRecording.find("id", recordingId).singleResult(), archive);
     }
 
     @Blocking
