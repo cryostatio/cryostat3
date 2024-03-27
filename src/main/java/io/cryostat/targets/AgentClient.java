@@ -35,6 +35,7 @@ import org.openjdk.jmc.flightrecorder.configuration.internal.EventTypeIDV2;
 import org.openjdk.jmc.rjmx.services.jfr.IEventTypeInfo;
 import org.openjdk.jmc.rjmx.services.jfr.IRecordingDescriptor;
 
+import io.cryostat.ConfigProperties;
 import io.cryostat.core.net.MBeanMetrics;
 import io.cryostat.core.serialization.SerializableRecordingDescriptor;
 import io.cryostat.credentials.Credential;
@@ -63,6 +64,7 @@ import jdk.jfr.RecordingState;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.tuple.Pair;
 import org.apache.hc.client5.http.auth.InvalidCredentialsException;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 public class AgentClient {
@@ -95,6 +97,10 @@ public class AgentClient {
 
     URI getUri() {
         return getTarget().connectUrl;
+    }
+
+    Duration getTimeout() {
+        return httpTimeout;
     }
 
     Uni<Boolean> ping() {
@@ -424,9 +430,11 @@ public class AgentClient {
         @Inject CredentialsFinder credentialsFinder;
         @Inject Logger logger;
 
+        @ConfigProperty(name = ConfigProperties.CONNECTIONS_FAILED_TIMEOUT)
+        Duration timeout;
+
         public AgentClient create(Target target) {
-            return new AgentClient(
-                    target, webClient, mapper, Duration.ofSeconds(10), credentialsFinder);
+            return new AgentClient(target, webClient, mapper, timeout, credentialsFinder);
         }
     }
 

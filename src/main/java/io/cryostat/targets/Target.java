@@ -28,6 +28,7 @@ import java.util.Optional;
 
 import org.openjdk.jmc.rjmx.services.jfr.IRecordingDescriptor;
 
+import io.cryostat.ConfigProperties;
 import io.cryostat.discovery.DiscoveryNode;
 import io.cryostat.recordings.ActiveRecording;
 import io.cryostat.recordings.Recordings.Metadata;
@@ -57,6 +58,7 @@ import jakarta.transaction.Transactional;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import org.apache.commons.lang3.StringUtils;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 import org.jboss.logging.Logger;
@@ -194,6 +196,9 @@ public class Target extends PanacheEntity {
         @Inject EventBus bus;
         @Inject TargetConnectionManager connectionManager;
 
+        @ConfigProperty(name = ConfigProperties.CONNECTIONS_FAILED_TIMEOUT)
+        Duration timeout;
+
         @Transactional
         @ConsumeEvent(value = Target.TARGET_JVM_DISCOVERY, blocking = true)
         void onMessage(TargetDiscovery event) {
@@ -244,7 +249,7 @@ public class Target extends PanacheEntity {
                                         Optional.empty(),
                                         conn -> conn.getJvmIdentifier().getHash())
                                 .await()
-                                .atMost(Duration.ofSeconds(10));
+                                .atMost(timeout);
             } catch (Exception e) {
                 logger.info(e);
             }

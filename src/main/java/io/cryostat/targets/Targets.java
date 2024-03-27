@@ -20,6 +20,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
 
+import io.cryostat.ConfigProperties;
 import io.cryostat.credentials.Credential;
 import io.cryostat.expressions.MatchExpressionEvaluator;
 
@@ -30,6 +31,7 @@ import jakarta.transaction.Transactional;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.core.Response;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 import org.jboss.resteasy.reactive.RestPath;
 import org.jboss.resteasy.reactive.RestResponse;
@@ -41,6 +43,9 @@ public class Targets {
     @Inject MatchExpressionEvaluator matchExpressionEvaluator;
     @Inject TargetConnectionManager connectionManager;
     @Inject Logger logger;
+
+    @ConfigProperty(name = ConfigProperties.CONNECTIONS_FAILED_TIMEOUT)
+    Duration timeout;
 
     @ConsumeEvent(value = Credential.CREDENTIALS_STORED, blocking = true)
     @Transactional
@@ -61,7 +66,7 @@ public class Targets {
                                                                     conn.getJvmIdentifier()
                                                                             .getHash())
                                                     .await()
-                                                    .atMost(Duration.ofSeconds(10));
+                                                    .atMost(timeout);
                                     t.persist();
                                 }
                             } catch (ScriptException e) {

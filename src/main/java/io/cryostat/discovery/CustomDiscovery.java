@@ -25,6 +25,7 @@ import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import io.cryostat.ConfigProperties;
 import io.cryostat.V2Response;
 import io.cryostat.credentials.Credential;
 import io.cryostat.expressions.MatchExpression;
@@ -49,6 +50,7 @@ import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.exception.ExceptionUtils;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.hibernate.exception.ConstraintViolationException;
 import org.jboss.logging.Logger;
 import org.jboss.resteasy.reactive.RestForm;
@@ -67,6 +69,9 @@ public class CustomDiscovery {
     @Inject Logger logger;
     @Inject EventBus bus;
     @Inject TargetConnectionManager connectionManager;
+
+    @ConfigProperty(name = ConfigProperties.CONNECTIONS_FAILED_TIMEOUT)
+    Duration timeout;
 
     @Transactional
     void onStart(@Observes StartupEvent evt) {
@@ -140,7 +145,7 @@ public class CustomDiscovery {
                                         credential,
                                         conn -> conn.getJvmIdentifier().getHash())
                                 .await()
-                                .atMost(Duration.ofSeconds(10));
+                                .atMost(timeout);
             } catch (Exception e) {
                 logger.error("Target connection failed", e);
                 return Response.status(Response.Status.BAD_REQUEST.getStatusCode())

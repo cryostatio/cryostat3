@@ -17,7 +17,6 @@ package io.cryostat.targets;
 
 import java.io.IOException;
 import java.net.URI;
-import java.time.Duration;
 import java.util.Set;
 
 import javax.management.InstanceNotFoundException;
@@ -58,7 +57,7 @@ class AgentConnection implements JFRConnection {
     @Blocking
     @Override
     public void connect() throws ConnectionException {
-        if (!client.ping().await().atMost(Duration.ofSeconds(10))) {
+        if (!client.ping().await().atMost(client.getTimeout())) {
             throw new ConnectionException("Connection failed");
         }
     }
@@ -135,7 +134,7 @@ class AgentConnection implements JFRConnection {
                     InstanceNotFoundException,
                     IntrospectionException,
                     ReflectionException {
-        return client.mbeanMetrics().await().atMost(Duration.ofSeconds(10));
+        return client.mbeanMetrics().await().atMost(client.getTimeout());
     }
 
     @ApplicationScoped

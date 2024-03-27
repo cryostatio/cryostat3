@@ -19,7 +19,6 @@ import java.io.BufferedInputStream;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.time.Duration;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
@@ -84,7 +83,7 @@ class AgentJFRService implements CryostatFlightRecorderService {
     @Blocking
     @Override
     public void close(IRecordingDescriptor descriptor) throws FlightRecorderException {
-        client.deleteRecording(descriptor.getId()).await().atMost(Duration.ofSeconds(10));
+        client.deleteRecording(descriptor.getId()).await().atMost(client.getTimeout());
     }
 
     @Override
@@ -96,7 +95,7 @@ class AgentJFRService implements CryostatFlightRecorderService {
     @Override
     public Collection<? extends IEventTypeInfo> getAvailableEventTypes()
             throws FlightRecorderException {
-        return client.eventTypes().await().atMost(Duration.ofSeconds(10));
+        return client.eventTypes().await().atMost(client.getTimeout());
     }
 
     @Override
@@ -108,14 +107,14 @@ class AgentJFRService implements CryostatFlightRecorderService {
     @Blocking
     @Override
     public List<IRecordingDescriptor> getAvailableRecordings() throws FlightRecorderException {
-        return client.activeRecordings().await().atMost(Duration.ofSeconds(10));
+        return client.activeRecordings().await().atMost(client.getTimeout());
     }
 
     @Blocking
     @Override
     public IConstrainedMap<EventOptionID> getCurrentEventTypeSettings()
             throws FlightRecorderException {
-        return Optional.of(client.eventSettings().await().atMost(Duration.ofSeconds(10)))
+        return Optional.of(client.eventSettings().await().atMost(client.getTimeout()))
                 .orElse(new DefaultValueMap<>(Map.of()));
     }
 
@@ -140,13 +139,13 @@ class AgentJFRService implements CryostatFlightRecorderService {
     @Blocking
     @Override
     public List<String> getServerTemplates() throws FlightRecorderException {
-        return client.eventTemplates().await().atMost(Duration.ofSeconds(10));
+        return client.eventTemplates().await().atMost(client.getTimeout());
     }
 
     @Blocking
     @Override
     public IRecordingDescriptor getSnapshotRecording() throws FlightRecorderException {
-        return client.startSnapshot().await().atMost(Duration.ofSeconds(10));
+        return client.startSnapshot().await().atMost(client.getTimeout());
     }
 
     @Override
@@ -165,7 +164,7 @@ class AgentJFRService implements CryostatFlightRecorderService {
     public InputStream openStream(IRecordingDescriptor descriptor, boolean removeOnClose)
             throws FlightRecorderException {
         Uni<Buffer> u = client.openStream(descriptor.getId());
-        Buffer b = u.await().atMost(Duration.ofSeconds(10));
+        Buffer b = u.await().atMost(client.getTimeout());
         return new BufferedInputStream(new ByteArrayInputStream(b.getBytes()));
     }
 
@@ -196,7 +195,7 @@ class AgentJFRService implements CryostatFlightRecorderService {
     @Blocking
     @Override
     public void stop(IRecordingDescriptor descriptor) throws FlightRecorderException {
-        client.stopRecording(descriptor.getId()).await().atMost(Duration.ofSeconds(10));
+        client.stopRecording(descriptor.getId()).await().atMost(client.getTimeout());
     }
 
     @Override
@@ -213,7 +212,7 @@ class AgentJFRService implements CryostatFlightRecorderService {
             throws FlightRecorderException {
         client.updateRecordingOptions(descriptor.getId(), newSettings)
                 .await()
-                .atMost(Duration.ofSeconds(10));
+                .atMost(client.getTimeout());
     }
 
     @Blocking
@@ -271,7 +270,7 @@ class AgentJFRService implements CryostatFlightRecorderService {
                     new StartRecordingRequest(
                             recordingName, templateName, null, duration, maxSize, maxAge);
         }
-        return client.startRecording(req).await().atMost(Duration.ofSeconds(10));
+        return client.startRecording(req).await().atMost(client.getTimeout());
     }
 
     public static class UnimplementedException extends IllegalStateException {}
