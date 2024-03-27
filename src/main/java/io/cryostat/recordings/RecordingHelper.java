@@ -32,15 +32,15 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -97,6 +97,14 @@ import org.apache.commons.validator.routines.UrlValidator;
 import org.apache.hc.core5.http.HttpStatus;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
+import org.quartz.Job;
+import org.quartz.JobBuilder;
+import org.quartz.JobDetail;
+import org.quartz.JobExecutionContext;
+import org.quartz.JobKey;
+import org.quartz.Scheduler;
+import org.quartz.Trigger;
+import org.quartz.TriggerBuilder;
 import software.amazon.awssdk.core.exception.SdkClientException;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.S3Client;
@@ -135,8 +143,8 @@ public class RecordingHelper {
     @Inject EventOptionsBuilder.Factory eventOptionsBuilderFactory;
     @Inject TargetTemplateService.Factory targetTemplateServiceFactory;
     @Inject S3TemplateService customTemplateService;
-    // FIXME replace this with Quartz
-    @Inject ScheduledExecutorService scheduler;
+    @Inject Scheduler scheduler;
+    private final List<JobKey> jobs = new CopyOnWriteArrayList<>();
 
     @Inject
     @Named(Producers.BASE64_URL)
@@ -239,10 +247,22 @@ public class RecordingHelper {
         target.persist();
 
         if (!recording.continuous) {
-            scheduler.schedule(
-                    () -> stopRecording(recording.id, archiveOnStop),
-                    recording.duration,
-                    TimeUnit.MILLISECONDS);
+            JobDetail jobDetail =
+                    JobBuilder.newJob(StopRecordingJob.class)
+                            .withIdentity(recording.name, target.jvmId)
+                            .build();
+            if (!jobs.contains(jobDetail.getKey())) {
+                Map<String, Object> data = jobDetail.getJobDataMap();
+                data.put("recording", recording);
+                data.put("archive", archiveOnStop);
+                Trigger trigger =
+                        TriggerBuilder.newTrigger()
+                                .withIdentity(recording.name, target.jvmId)
+                                .usingJobData(jobDetail.getJobDataMap())
+                                .startAt(new Date(System.currentTimeMillis() + recording.duration))
+                                .build();
+                scheduler.scheduleJob(jobDetail, trigger);
+            }
         }
 
         return recording;
@@ -997,6 +1017,20 @@ public class RecordingHelper {
                 }
             }
             throw new IllegalArgumentException("Invalid recording replace value: " + replace);
+        }
+    }
+
+    static class StopRecordingJob implements Job {
+
+        @Inject RecordingHelper recordingHelper;
+        @Inject Logger logger;
+
+        @Override
+        @Transactional
+        public void execute(JobExecutionContext ctx) {
+            var recording = (ActiveRecording) ctx.getJobDetail().getJobDataMap().get("recording");
+            var archive = (boolean) ctx.getJobDetail().getJobDataMap().get("archive");
+            recordingHelper.stopRecording(recording.id, archive);
         }
     }
 
