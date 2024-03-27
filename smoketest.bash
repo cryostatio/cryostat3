@@ -180,6 +180,8 @@ cleanup() {
         ${container_engine} rm localstack_cfg_helper || true
         ${container_engine} volume rm localstack_cfg || true
     fi
+    ${container_engine} rm jmxtls_cfg_helper || true
+    ${container_engine} volume rm jmxtls_cfg || true
     truncate -s 0 "${HOSTSFILE}"
     for i in "${PIDS[@]}"; do
         kill -0 "${i}" && kill "${i}"
@@ -211,6 +213,13 @@ createLocalstackCfgVolume() {
 if [ "${s3}" = "localstack" ]; then
     createLocalstackCfgVolume
 fi
+
+createJmxTlsCertVolume() {
+    "${container_engine}" volume create jmxtls_cfg
+    "${container_engine}" container create --name jmxtls_cfg_helper -v jmxtls_cfg:/truststore busybox
+    "${container_engine}" cp "${DIR}/truststore" jmxtls_cfg_helper:/truststore
+}
+createJmxTlsCertVolume
 
 setupUserHosts() {
     # This requires https://github.com/figiel/hosts to work. See README.

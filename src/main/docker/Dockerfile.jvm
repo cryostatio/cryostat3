@@ -88,11 +88,26 @@ LABEL io.cryostat.component=cryostat3
 ENV JAVA_OPTS_APPEND="-Dquarkus.http.host=0.0.0.0 -Djava.util.logging.manager=org.jboss.logmanager.LogManager"
 ENV JAVA_APP_JAR="/deployments/quarkus-run.jar"
 
-ENTRYPOINT [ "/opt/jboss/container/java/run/run-java.sh" ]
+ENTRYPOINT [ "/deployments/app/entrypoint.bash", "/opt/jboss/container/java/run/run-java.sh" ]
 
 # We make distinct layers so if there are application changes the library layers can be re-used
 COPY --chown=185 src/main/docker/include/cryostat.jfc /usr/lib/jvm/jre/lib/jfr/
+COPY --chown=185 src/main/docker/include/genpass.bash /deployments/app/
+COPY --chown=185 src/main/docker/include/entrypoint.bash /deployments/app/
+COPY --chown=185 src/main/docker/include/truststore-setup.bash /deployments/app/
 COPY --chown=185 target/quarkus-app/lib/ /deployments/lib/
 COPY --chown=185 target/quarkus-app/*.jar /deployments/
 COPY --chown=185 target/quarkus-app/app/ /deployments/app/
 COPY --chown=185 target/quarkus-app/quarkus/ /deployments/quarkus/
+
+ENV CONF_DIR=/opt/cryostat.d
+ENV SSL_TRUSTSTORE=$CONF_DIR/truststore.p12 \
+    SSL_TRUSTSTORE_PASS_FILE=$CONF_DIR/truststore.pass
+
+USER root
+RUN mkdir -p $CONF_DIR \
+    && chmod -R g=u $CONF_DIR \
+    && chown jboss:root $CONF_DIR
+USER 185
+
+RUN /deployments/app/truststore-setup.bash
