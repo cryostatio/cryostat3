@@ -206,6 +206,29 @@ public class RecordingHelper {
     }
 
     @Blocking
+    public void updateRemoteRecordings(Target target) {
+        try {
+            target.activeRecordings.clear();
+            target.persist();
+            List<IRecordingDescriptor> descriptors =
+                    connectionManager.executeConnectedTask(
+                            target, conn -> conn.getService().getAvailableRecordings());
+            for (var descriptor : descriptors) {
+                // TODO is there any metadata to attach here?
+                var recording = ActiveRecording.from(target, descriptor, new Metadata(Map.of()));
+                recording.persist();
+                target.activeRecordings.add(recording);
+            }
+            target.persist();
+        } catch (Exception e) {
+            logger.errorv(
+                    e,
+                    "Failure to synchronize existing target recording state for {0}",
+                    target.connectUrl);
+        }
+    }
+
+    @Blocking
     public ActiveRecording startRecording(
             Target target,
             IConstrainedMap<String> recordingOptions,

@@ -26,12 +26,14 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
-import org.openjdk.jmc.rjmx.services.jfr.IRecordingDescriptor;
-
 import io.cryostat.ConfigProperties;
+import io.cryostat.core.JvmIdentifier;
+import io.cryostat.core.net.JFRConnection;
+import io.cryostat.credentials.Credential;
 import io.cryostat.discovery.DiscoveryNode;
+import io.cryostat.expressions.MatchExpressionEvaluator;
 import io.cryostat.recordings.ActiveRecording;
-import io.cryostat.recordings.Recordings.Metadata;
+import io.cryostat.recordings.RecordingHelper;
 import io.cryostat.ws.MessagingServer;
 import io.cryostat.ws.Notification;
 
@@ -40,6 +42,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import io.quarkus.hibernate.orm.panache.PanacheEntity;
 import io.quarkus.vertx.ConsumeEvent;
+import io.smallrye.common.annotation.Blocking;
 import io.vertx.mutiny.core.eventbus.EventBus;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -62,6 +65,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 import org.jboss.logging.Logger;
+import org.projectnessie.cel.tools.ScriptException;
 
 @Entity
 @EntityListeners(Target.Listener.class)
@@ -195,6 +199,8 @@ public class Target extends PanacheEntity {
         @Inject Logger logger;
         @Inject EventBus bus;
         @Inject TargetConnectionManager connectionManager;
+        @Inject RecordingHelper recordingHelper;
+        @Inject MatchExpressionEvaluator matchExpressionEvaluator;
 
         @ConfigProperty(name = ConfigProperties.CONNECTIONS_FAILED_TIMEOUT)
         Duration timeout;
@@ -202,28 +208,17 @@ public class Target extends PanacheEntity {
         @Transactional
         @ConsumeEvent(value = Target.TARGET_JVM_DISCOVERY, blocking = true)
         void onMessage(TargetDiscovery event) {
+            var target = Target.<Target>find("id", event.serviceRef().id).singleResultOptional();
             switch (event.kind()) {
                 case LOST:
                     // this should already be handled by the cascading deletion of the Target
                     // TODO verify this
                     break;
                 case FOUND:
-                    Target target = event.serviceRef();
-                    try {
-                        List<IRecordingDescriptor> descriptors =
-                                connectionManager.executeConnectedTask(
-                                        target, conn -> conn.getService().getAvailableRecordings());
-                        for (var descriptor : descriptors) {
-                            // TODO is there any metadata to attach here?
-                            ActiveRecording.from(target, descriptor, new Metadata(Map.of()))
-                                    .persist();
-                        }
-                    } catch (Exception e) {
-                        logger.errorv(
-                                e,
-                                "Failure to synchronize existing target recording state for {0}",
-                                target.connectUrl);
-                    }
+                    target.ifPresent(recordingHelper::updateRemoteRecordings);
+                    break;
+                case MODIFIED:
+                    target.ifPresent(recordingHelper::updateRemoteRecordings);
                     break;
                 default:
                     // no-op
@@ -231,28 +226,58 @@ public class Target extends PanacheEntity {
             }
         }
 
+        @ConsumeEvent(value = Credential.CREDENTIALS_STORED, blocking = true)
+        @Transactional
+        void updateCredential(Credential credential) {
+            Target.<Target>find("jvmId", (String) null)
+                    .list()
+                    .forEach(
+                            t -> {
+                                try {
+                                    if (matchExpressionEvaluator.applies(
+                                            credential.matchExpression, t)) {
+                                        updateTargetJvmId(t, credential);
+                                        t.persist();
+                                    }
+                                } catch (ScriptException e) {
+                                    logger.error(e);
+                                } catch (Exception e) {
+                                    logger.warn(e);
+                                }
+                            });
+        }
+
+        @Blocking
         @PrePersist
-        void prePersist(Target target) throws JvmIdException {
+        void prePersist(Target target) {
             if (StringUtils.isBlank(target.alias)) {
                 throw new IllegalArgumentException();
             }
-            target.alias = URLEncoder.encode(target.alias, StandardCharsets.UTF_8);
-
-            if (StringUtils.isNotBlank(target.jvmId)) {
-                return;
+            var encodedAlias = URLEncoder.encode(target.alias, StandardCharsets.UTF_8);
+            if (!Objects.equals(encodedAlias, target.alias)) {
+                target.alias = encodedAlias;
             }
+
             try {
-                target.jvmId =
-                        connectionManager
-                                .executeDirect(
-                                        target,
-                                        Optional.empty(),
-                                        conn -> conn.getJvmIdentifier().getHash())
-                                .await()
-                                .atMost(timeout);
+                if (StringUtils.isBlank(target.jvmId)) {
+                    updateTargetJvmId(target, null);
+                }
             } catch (Exception e) {
                 logger.info(e);
             }
+        }
+
+        @Blocking
+        private void updateTargetJvmId(Target t, Credential credential) {
+            t.jvmId =
+                    connectionManager
+                            .executeDirect(
+                                    t,
+                                    Optional.ofNullable(credential),
+                                    JFRConnection::getJvmIdentifier)
+                            .map(JvmIdentifier::getHash)
+                            .await()
+                            .atMost(timeout);
         }
 
         @PostPersist
