@@ -101,6 +101,7 @@ import org.quartz.Job;
 import org.quartz.JobBuilder;
 import org.quartz.JobDetail;
 import org.quartz.JobExecutionContext;
+import org.quartz.JobExecutionException;
 import org.quartz.JobKey;
 import org.quartz.Scheduler;
 import org.quartz.Trigger;
@@ -380,7 +381,7 @@ public class RecordingHelper {
 
     @Blocking
     @Transactional
-    public ActiveRecording stopRecording(long recordingId, boolean archive) {
+    public ActiveRecording stopRecording(long recordingId, boolean archive) throws Exception {
         // look up the recording by ID to ensure it is an attached entity reference. This is used
         // because this method is invoked from a background scheduler thread, so it is not part of
         // the usual persistence context.
@@ -389,33 +390,36 @@ public class RecordingHelper {
 
     @Blocking
     @Transactional
-    public ActiveRecording stopRecording(ActiveRecording recording, boolean archive) {
-        return connectionManager.executeConnectedTask(
-                recording.target,
-                conn -> {
-                    var desc = getDescriptorById(conn, recording.remoteId);
-                    if (desc.isEmpty()) {
-                        throw new NotFoundException();
-                    }
-                    if (!desc.get()
-                            .getState()
-                            .equals(
-                                    org.openjdk.jmc.rjmx.services.jfr.IRecordingDescriptor
-                                            .RecordingState.STOPPED)) {
-                        conn.getService().stop(desc.get());
-                    }
-                    recording.state = RecordingState.STOPPED;
-                    recording.persist();
-                    if (archive) {
-                        saveRecording(recording);
-                    }
-                    return recording;
-                });
+    public ActiveRecording stopRecording(ActiveRecording recording, boolean archive)
+            throws Exception {
+        var out =
+                connectionManager.executeConnectedTask(
+                        recording.target,
+                        conn -> {
+                            var desc = getDescriptorById(conn, recording.remoteId);
+                            if (desc.isEmpty()) {
+                                throw new NotFoundException();
+                            }
+                            if (!desc.get()
+                                    .getState()
+                                    .equals(
+                                            org.openjdk.jmc.rjmx.services.jfr.IRecordingDescriptor
+                                                    .RecordingState.STOPPED)) {
+                                conn.getService().stop(desc.get());
+                            }
+                            recording.state = RecordingState.STOPPED;
+                            return recording;
+                        });
+        out.persist();
+        if (archive) {
+            saveRecording(out);
+        }
+        return out;
     }
 
     @Blocking
     @Transactional
-    public ActiveRecording stopRecording(ActiveRecording recording) {
+    public ActiveRecording stopRecording(ActiveRecording recording) throws Exception {
         return stopRecording(recording, false);
     }
 
@@ -1050,10 +1054,14 @@ public class RecordingHelper {
 
         @Override
         @Transactional
-        public void execute(JobExecutionContext ctx) {
+        public void execute(JobExecutionContext ctx) throws JobExecutionException {
             var recording = (ActiveRecording) ctx.getJobDetail().getJobDataMap().get("recording");
             var archive = (boolean) ctx.getJobDetail().getJobDataMap().get("archive");
-            recordingHelper.stopRecording(recording.id, archive);
+            try {
+                recordingHelper.stopRecording(recording.id, archive);
+            } catch (Exception e) {
+                throw new JobExecutionException(e);
+            }
         }
     }
 
