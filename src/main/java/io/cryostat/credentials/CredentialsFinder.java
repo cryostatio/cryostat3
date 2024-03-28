@@ -76,7 +76,8 @@ public class CredentialsFinder {
 
     @Blocking
     public Optional<Credential> getCredentialsForConnectUrl(URI connectUrl) {
-        return getCredentialsForTarget(
-                Target.find("connectUrl", connectUrl).<Target>singleResult());
+        return Target.find("connectUrl", connectUrl)
+                .<Target>singleResultOptional()
+                .flatMap(this::getCredentialsForTarget);
     }
 }
