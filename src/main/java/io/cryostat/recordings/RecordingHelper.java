@@ -277,7 +277,7 @@ public class RecordingHelper {
                             .build();
             if (!jobs.contains(jobDetail.getKey())) {
                 Map<String, Object> data = jobDetail.getJobDataMap();
-                data.put("recording", recording);
+                data.put("recordingId", recording.id);
                 data.put("archive", archiveOnStop);
                 Trigger trigger =
                         TriggerBuilder.newTrigger()
@@ -377,15 +377,6 @@ public class RecordingHelper {
             default:
                 return true;
         }
-    }
-
-    @Blocking
-    @Transactional
-    public ActiveRecording stopRecording(long recordingId, boolean archive) throws Exception {
-        // look up the recording by ID to ensure it is an attached entity reference. This is used
-        // because this method is invoked from a background scheduler thread, so it is not part of
-        // the usual persistence context.
-        return stopRecording(ActiveRecording.find("id", recordingId).singleResult(), archive);
     }
 
     @Blocking
@@ -1055,10 +1046,11 @@ public class RecordingHelper {
         @Override
         @Transactional
         public void execute(JobExecutionContext ctx) throws JobExecutionException {
-            var recording = (ActiveRecording) ctx.getJobDetail().getJobDataMap().get("recording");
+            var recordingId = (long) ctx.getJobDetail().getJobDataMap().get("recordingId");
             var archive = (boolean) ctx.getJobDetail().getJobDataMap().get("archive");
             try {
-                recordingHelper.stopRecording(recording.id, archive);
+                recordingHelper.stopRecording(
+                        ActiveRecording.find("id", recordingId).singleResult(), archive);
             } catch (Exception e) {
                 throw new JobExecutionException(e);
             }
