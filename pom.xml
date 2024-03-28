@@ -24,7 +24,7 @@
     <org.apache.commons.lang3.version>3.13.0</org.apache.commons.lang3.version>
     <org.apache.commons.validator.version>1.7</org.apache.commons.validator.version>
     <org.projectnessie.cel.bom.version>0.3.21</org.projectnessie.cel.bom.version>
-    <com.nimbusds.jose.jwt.version>9.31</com.nimbusds.jose.jwt.version>
+    <com.nimbusds.jose.jwt.version>9.37.3</com.nimbusds.jose.jwt.version>
     <org.testcontainers.bom.version>1.19.7</org.testcontainers.bom.version>
     <quarkus.platform.artifact-id>quarkus-bom</quarkus.platform.artifact-id>
     <quarkus.platform.group-id>io.quarkus.platform</quarkus.platform.group-id>
