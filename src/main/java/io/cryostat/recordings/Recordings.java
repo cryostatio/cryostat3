@@ -113,7 +113,7 @@ public class Recordings {
     @Inject TargetConnectionManager connectionManager;
     @Inject EventBus bus;
     @Inject RecordingOptionsBuilderFactory recordingOptionsBuilderFactory;
-    @Inject RecordingOptionsCustomizer recordingOptionsCustomizer;
+    @Inject RecordingOptionsCustomizerFactory recordingOptionsCustomizerFactory;
     @Inject EventOptionsBuilder.Factory eventOptionsBuilderFactory;
     @Inject Clock clock;
     @Inject S3Client storage;
@@ -604,7 +604,7 @@ public class Recordings {
                         connection -> {
                             RecordingOptionsBuilder optionsBuilder =
                                     recordingOptionsBuilderFactory
-                                            .create(connection.getService())
+                                            .create(target)
                                             .name(recordingName);
                             if (duration.isPresent()) {
                                 optionsBuilder.duration(TimeUnit.SECONDS.toMillis(duration.get()));
@@ -884,8 +884,7 @@ public class Recordings {
         return connectionManager.executeConnectedTask(
                 target,
                 connection -> {
-                    RecordingOptionsBuilder builder =
-                            recordingOptionsBuilderFactory.create(connection.getService());
+                    RecordingOptionsBuilder builder = recordingOptionsBuilderFactory.create(target);
                     return getRecordingOptions(connection.getService(), builder);
                 });
     }
@@ -906,6 +905,9 @@ public class Recordings {
     @Blocking
     @Path("/api/v3/targets/{id}/recordingOptions")
     @RolesAllowed("read")
+    @SuppressFBWarnings(
+            value = "UC_USELESS_OBJECT",
+            justification = "SpotBugs thinks the options map is unused, but it is used")
     public Map<String, Object> patchRecordingOptions(
             @RestPath long id,
             @RestForm String toDisk,
@@ -914,20 +916,20 @@ public class Recordings {
             throws Exception {
         final String unsetKeyword = "unset";
 
-        Map<String, String> form = new HashMap<>();
+        Map<String, String> options = new HashMap<>();
         Pattern bool = Pattern.compile("true|false|" + unsetKeyword);
         if (toDisk != null) {
             Matcher m = bool.matcher(toDisk);
             if (!m.matches()) {
                 throw new BadRequestException("Invalid options");
             }
-            form.put("toDisk", toDisk);
+            options.put("toDisk", toDisk);
         }
         if (maxAge != null) {
             if (!unsetKeyword.equals(maxAge)) {
                 try {
                     Long.parseLong(maxAge);
-                    form.put("maxAge", maxAge);
+                    options.put("maxAge", maxAge);
                 } catch (NumberFormatException e) {
                     throw new BadRequestException("Invalid options");
                 }
@@ -937,31 +939,28 @@ public class Recordings {
             if (!unsetKeyword.equals(maxSize)) {
                 try {
                     Long.parseLong(maxSize);
-                    form.put("maxSize", maxSize);
+                    options.put("maxSize", maxSize);
                 } catch (NumberFormatException e) {
                     throw new BadRequestException("Invalid options");
                 }
             }
         }
-        form.entrySet()
-                .forEach(
-                        e -> {
-                            RecordingOptionsCustomizer.OptionKey optionKey =
-                                    RecordingOptionsCustomizer.OptionKey.fromOptionName(e.getKey())
-                                            .get();
-                            if ("unset".equals(e.getValue())) {
-                                recordingOptionsCustomizer.unset(optionKey);
-                            } else {
-                                recordingOptionsCustomizer.set(optionKey, e.getValue());
-                            }
-                        });
-
         Target target = Target.find("id", id).singleResult();
+        for (var entry : options.entrySet()) {
+            RecordingOptionsCustomizer.OptionKey optionKey =
+                    RecordingOptionsCustomizer.OptionKey.fromOptionName(entry.getKey()).get();
+            var recordingOptionsCustomizer = recordingOptionsCustomizerFactory.create(target);
+            if (unsetKeyword.equals(entry.getValue())) {
+                recordingOptionsCustomizer.unset(optionKey);
+            } else {
+                recordingOptionsCustomizer.set(optionKey, entry.getValue());
+            }
+        }
+
         return connectionManager.executeConnectedTask(
                 target,
                 connection -> {
-                    RecordingOptionsBuilder builder =
-                            recordingOptionsBuilderFactory.create(connection.getService());
+                    var builder = recordingOptionsBuilderFactory.create(target);
                     return getRecordingOptions(connection.getService(), builder);
                 });
     }

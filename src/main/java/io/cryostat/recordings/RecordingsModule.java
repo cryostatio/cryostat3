@@ -15,37 +15,17 @@
  */
 package io.cryostat.recordings;
 
-import org.openjdk.jmc.flightrecorder.configuration.recording.RecordingOptionsBuilder;
-
 import io.cryostat.core.EventOptionsBuilder;
-import io.cryostat.core.RecordingOptionsCustomizer;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Produces;
 import jakarta.inject.Singleton;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 @Singleton
 public class RecordingsModule {
-
-    @Produces
-    @ApplicationScoped
-    public RecordingOptionsBuilderFactory provideRecordingOptionsBuilderFactory(
-            RecordingOptionsCustomizer customizer) {
-        return service -> customizer.apply(new RecordingOptionsBuilder(service));
-    }
-
     @Produces
     @ApplicationScoped
     public EventOptionsBuilder.Factory provideEventOptionsBuilderFactory() {
         return new EventOptionsBuilder.Factory();
-    }
-
-    @Produces
-    @ApplicationScoped
-    public RecordingOptionsCustomizer provideRecordingOptionsCustomizer() {
-        Logger log = LoggerFactory.getLogger(RecordingOptionsCustomizer.class);
-        return new RecordingOptionsCustomizer(log::debug);
     }
 }
