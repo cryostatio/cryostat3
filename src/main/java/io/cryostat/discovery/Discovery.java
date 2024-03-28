@@ -399,17 +399,17 @@ public class Discovery {
                 var cb = PluginCallback.create(plugin);
                 if (refresh) {
                     cb.refresh();
-                    logger.infov(
+                    logger.debugv(
                             "Refreshed discovery plugin: {0} @ {1}", plugin.realm, plugin.callback);
                 } else {
                     cb.ping();
-                    logger.infov(
+                    logger.debugv(
                             "Retained discovery plugin: {0} @ {1}", plugin.realm, plugin.callback);
                 }
             } catch (Exception e) {
                 if (plugin != null) {
-                    logger.infov(
-                            "Pruned discovery plugin: {0} @ {1}", plugin.realm, plugin.callback);
+                    logger.debugv(
+                            e, "Pruned discovery plugin: {0} @ {1}", plugin.realm, plugin.callback);
                     plugin.realm.delete();
                     plugin.delete();
                     new DiscoveryPlugin.PluginCallback.DiscoveryPluginAuthorizationHeaderFactory(

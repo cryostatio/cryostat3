@@ -18,22 +18,19 @@ package io.cryostat.targets;
 import java.net.URI;
 import java.time.Duration;
 import java.util.List;
-import java.util.Optional;
 
-import io.cryostat.credentials.Credential;
+import io.cryostat.ConfigProperties;
 import io.cryostat.expressions.MatchExpressionEvaluator;
 
-import io.quarkus.vertx.ConsumeEvent;
 import jakarta.annotation.security.RolesAllowed;
 import jakarta.inject.Inject;
-import jakarta.transaction.Transactional;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.core.Response;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 import org.jboss.resteasy.reactive.RestPath;
 import org.jboss.resteasy.reactive.RestResponse;
-import org.projectnessie.cel.tools.ScriptException;
 
 @Path("")
 public class Targets {
@@ -42,35 +39,8 @@ public class Targets {
     @Inject TargetConnectionManager connectionManager;
     @Inject Logger logger;
 
-    @ConsumeEvent(value = Credential.CREDENTIALS_STORED, blocking = true)
-    @Transactional
-    void updateCredential(Credential credential) {
-        Target.<Target>find("jvmId", (String) null)
-                .list()
-                .forEach(
-                        t -> {
-                            try {
-                                if (matchExpressionEvaluator.applies(
-                                        credential.matchExpression, t)) {
-                                    t.jvmId =
-                                            connectionManager
-                                                    .executeDirect(
-                                                            t,
-                                                            Optional.empty(),
-                                                            conn ->
-                                                                    conn.getJvmIdentifier()
-                                                                            .getHash())
-                                                    .await()
-                                                    .atMost(Duration.ofSeconds(10));
-                                    t.persist();
-                                }
-                            } catch (ScriptException e) {
-                                logger.error(e);
-                            } catch (Exception e) {
-                                logger.warn(e);
-                            }
-                        });
-    }
+    @ConfigProperty(name = ConfigProperties.CONNECTIONS_FAILED_TIMEOUT)
+    Duration timeout;
 
     @GET
     @Path("/api/v1/targets")

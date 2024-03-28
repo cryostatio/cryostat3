@@ -15,22 +15,10 @@
  */
 package io.cryostat.targets;
 
-import java.net.URI;
+import jakarta.ws.rs.WebApplicationException;
 
-import io.cryostat.core.sys.Clock;
-
-import io.vertx.mutiny.core.Vertx;
-import io.vertx.mutiny.ext.web.client.WebClient;
-import jakarta.enterprise.context.ApplicationScoped;
-import jakarta.inject.Inject;
-
-@ApplicationScoped
-class AgentConnectionFactory {
-
-    @Inject Vertx vertx;
-    @Inject Clock clock;
-
-    AgentConnection createConnection(URI agentUri) {
-        return new AgentConnection(agentUri, WebClient.create(vertx), clock);
+public class AgentApiException extends WebApplicationException {
+    public AgentApiException(int statusCode) {
+        super(String.format("Unexpected HTTP response code %d", statusCode));
     }
 }

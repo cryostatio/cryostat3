@@ -129,6 +129,6 @@ public class MessagingServer {
 
     @ConsumeEvent
     void broadcast(Notification notification) {
-        msgQ.add(notification);
+        msgQ.offer(notification);
     }
 }

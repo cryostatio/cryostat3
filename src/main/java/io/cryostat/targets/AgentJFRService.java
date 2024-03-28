@@ -15,20 +15,28 @@
  */
 package io.cryostat.targets;
 
+import java.io.BufferedInputStream;
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import org.openjdk.jmc.common.unit.IConstrainedMap;
 import org.openjdk.jmc.common.unit.IDescribedMap;
 import org.openjdk.jmc.common.unit.IOptionDescriptor;
 import org.openjdk.jmc.common.unit.IQuantity;
+import org.openjdk.jmc.common.unit.ITypedQuantity;
 import org.openjdk.jmc.common.unit.QuantityConversionException;
+import org.openjdk.jmc.common.unit.UnitLookup;
 import org.openjdk.jmc.flightrecorder.configuration.events.EventOptionID;
 import org.openjdk.jmc.flightrecorder.configuration.events.IEventTypeID;
 import org.openjdk.jmc.flightrecorder.configuration.internal.DefaultValueMap;
+import org.openjdk.jmc.flightrecorder.configuration.internal.KnownEventOptions;
+import org.openjdk.jmc.flightrecorder.configuration.internal.KnownRecordingOptions;
+import org.openjdk.jmc.flightrecorder.configuration.recording.RecordingOptionsBuilder;
 import org.openjdk.jmc.rjmx.ConnectionException;
 import org.openjdk.jmc.rjmx.ServiceNotAvailableException;
 import org.openjdk.jmc.rjmx.services.jfr.FlightRecorderException;
@@ -38,26 +46,33 @@ import org.openjdk.jmc.rjmx.services.jfr.IRecordingDescriptor;
 import io.cryostat.core.EventOptionsBuilder.EventOptionException;
 import io.cryostat.core.EventOptionsBuilder.EventTypeException;
 import io.cryostat.core.net.CryostatFlightRecorderService;
+import io.cryostat.core.templates.TemplateService;
 import io.cryostat.core.templates.TemplateType;
 
-import io.vertx.mutiny.ext.web.client.WebClient;
+import io.smallrye.common.annotation.Blocking;
+import io.smallrye.mutiny.Uni;
+import io.vertx.mutiny.core.buffer.Buffer;
+import org.jboss.logging.Logger;
 
 class AgentJFRService implements CryostatFlightRecorderService {
 
-    private final WebClient webClient;
+    private final AgentClient client;
+    private final TemplateService templateService;
+    private final Logger logger = Logger.getLogger(getClass());
 
-    AgentJFRService(WebClient webClient) {
-        this.webClient = webClient;
+    AgentJFRService(AgentClient client, TemplateService templateService) {
+        this.client = client;
+        this.templateService = templateService;
     }
 
     @Override
     public IDescribedMap<EventOptionID> getDefaultEventOptions() {
-        return new DefaultValueMap<>(Map.of());
+        return KnownEventOptions.OPTION_DEFAULTS_V2;
     }
 
     @Override
     public IDescribedMap<String> getDefaultRecordingOptions() {
-        return new DefaultValueMap<>(Map.of());
+        return KnownRecordingOptions.OPTION_DEFAULTS_V2;
     }
 
     @Override
@@ -65,143 +80,147 @@ class AgentJFRService implements CryostatFlightRecorderService {
         return "agent"; // TODO
     }
 
+    @Blocking
     @Override
     public void close(IRecordingDescriptor descriptor) throws FlightRecorderException {
-        // TODO Auto-generated method stub
-        throw new UnimplementedException();
+        client.deleteRecording(descriptor.getId()).await().atMost(client.getTimeout());
     }
 
     @Override
     public void enable() throws FlightRecorderException {
-        // TODO Auto-generated method stub
         throw new UnimplementedException();
     }
 
+    @Blocking
     @Override
     public Collection<? extends IEventTypeInfo> getAvailableEventTypes()
             throws FlightRecorderException {
-        return List.of();
+        return client.eventTypes().await().atMost(client.getTimeout());
     }
 
     @Override
     public Map<String, IOptionDescriptor<?>> getAvailableRecordingOptions()
             throws FlightRecorderException {
-        return Map.of();
+        return KnownRecordingOptions.DESCRIPTORS_BY_KEY_V2;
     }
 
+    @Blocking
     @Override
     public List<IRecordingDescriptor> getAvailableRecordings() throws FlightRecorderException {
-        // TODO Auto-generated method stub
-        return List.of();
+        return client.activeRecordings().await().atMost(client.getTimeout());
     }
 
+    @Blocking
     @Override
     public IConstrainedMap<EventOptionID> getCurrentEventTypeSettings()
             throws FlightRecorderException {
-        // TODO Auto-generated method stub
-        return new DefaultValueMap<>(Map.of());
+        return Optional.of(client.eventSettings().await().atMost(client.getTimeout()))
+                .orElse(new DefaultValueMap<>(Map.of()));
     }
 
     @Override
-    public IConstrainedMap<EventOptionID> getEventSettings(IRecordingDescriptor arg0)
+    public IConstrainedMap<EventOptionID> getEventSettings(IRecordingDescriptor descriptor)
             throws FlightRecorderException {
-        // TODO Auto-generated method stub
         return new DefaultValueMap<>(Map.of());
     }
 
     @Override
     public Map<? extends IEventTypeID, ? extends IEventTypeInfo> getEventTypeInfoMapByID()
             throws FlightRecorderException {
-        // TODO Auto-generated method stub
         return Map.of();
     }
 
     @Override
-    public IConstrainedMap<String> getRecordingOptions(IRecordingDescriptor arg0)
+    public IConstrainedMap<String> getRecordingOptions(IRecordingDescriptor descriptor)
             throws FlightRecorderException {
-        // TODO Auto-generated method stub
         return new DefaultValueMap<>(Map.of());
     }
 
+    @Blocking
     @Override
     public List<String> getServerTemplates() throws FlightRecorderException {
-        // TODO Auto-generated method stub
-        return List.of();
+        return client.eventTemplates().await().atMost(client.getTimeout());
     }
 
+    @Blocking
     @Override
     public IRecordingDescriptor getSnapshotRecording() throws FlightRecorderException {
-        // TODO Auto-generated method stub
-        throw new UnimplementedException();
+        return client.startSnapshot().await().atMost(client.getTimeout());
     }
 
     @Override
-    public IRecordingDescriptor getUpdatedRecordingDescription(IRecordingDescriptor arg0)
+    public IRecordingDescriptor getUpdatedRecordingDescription(IRecordingDescriptor descriptor)
             throws FlightRecorderException {
-        // TODO Auto-generated method stub
         throw new UnimplementedException();
     }
 
     @Override
     public boolean isEnabled() {
-        // TODO Auto-generated method stub
         return true;
     }
 
+    @Blocking
     @Override
-    public InputStream openStream(IRecordingDescriptor arg0, boolean arg1)
+    public InputStream openStream(IRecordingDescriptor descriptor, boolean removeOnClose)
             throws FlightRecorderException {
-        // TODO Auto-generated method stub
-        throw new UnimplementedException();
+        Uni<Buffer> u = client.openStream(descriptor.getId());
+        Buffer b = u.await().atMost(client.getTimeout());
+        return new BufferedInputStream(new ByteArrayInputStream(b.getBytes()));
     }
 
     @Override
-    public InputStream openStream(IRecordingDescriptor arg0, IQuantity arg1, boolean arg2)
+    public InputStream openStream(
+            IRecordingDescriptor descriptor, IQuantity lastPartDuration, boolean removeOnClose)
             throws FlightRecorderException {
-        // TODO Auto-generated method stub
         throw new UnimplementedException();
     }
 
     @Override
     public InputStream openStream(
-            IRecordingDescriptor arg0, IQuantity arg1, IQuantity arg2, boolean arg3)
+            IRecordingDescriptor descriptor,
+            IQuantity startTime,
+            IQuantity endTime,
+            boolean removeOnClose)
             throws FlightRecorderException {
-        // TODO Auto-generated method stub
         throw new UnimplementedException();
     }
 
     @Override
     public IRecordingDescriptor start(
-            IConstrainedMap<String> arg0, IConstrainedMap<EventOptionID> arg1)
+            IConstrainedMap<String> recordingOptions, IConstrainedMap<EventOptionID> eventOptions)
             throws FlightRecorderException {
-        // TODO Auto-generated method stub
         throw new UnimplementedException();
     }
 
+    @Blocking
     @Override
-    public void stop(IRecordingDescriptor arg0) throws FlightRecorderException {
-        // TODO Auto-generated method stub
-        throw new UnimplementedException();
+    public void stop(IRecordingDescriptor descriptor) throws FlightRecorderException {
+        client.stopRecording(descriptor.getId()).await().atMost(client.getTimeout());
     }
 
     @Override
-    public void updateEventOptions(IRecordingDescriptor arg0, IConstrainedMap<EventOptionID> arg1)
+    public void updateEventOptions(
+            IRecordingDescriptor descriptor, IConstrainedMap<EventOptionID> eventOptions)
             throws FlightRecorderException {
-        // TODO Auto-generated method stub
         throw new UnimplementedException();
     }
 
+    @Blocking
     @Override
-    public void updateRecordingOptions(IRecordingDescriptor arg0, IConstrainedMap<String> arg1)
+    public void updateRecordingOptions(
+            IRecordingDescriptor descriptor, IConstrainedMap<String> newSettings)
             throws FlightRecorderException {
-        // TODO Auto-generated method stub
-        throw new UnimplementedException();
+        client.updateRecordingOptions(descriptor.getId(), newSettings)
+                .await()
+                .atMost(client.getTimeout());
     }
 
-    public static class UnimplementedException extends IllegalStateException {}
-
+    @Blocking
     @Override
-    public IRecordingDescriptor start(IConstrainedMap<String> arg0, String arg1, TemplateType arg2)
+    public IRecordingDescriptor start(
+            IConstrainedMap<String> recordingOptions,
+            String templateName,
+            TemplateType preferredTemplateType)
             throws io.cryostat.core.FlightRecorderException,
                     FlightRecorderException,
                     ConnectionException,
@@ -211,7 +230,56 @@ class AgentJFRService implements CryostatFlightRecorderService {
                     QuantityConversionException,
                     EventOptionException,
                     EventTypeException {
-        // TODO Auto-generated method stub
-        throw new UnsupportedOperationException("Unimplemented method 'start'");
+        StartRecordingRequest req;
+        String recordingName = recordingOptions.get("name").toString();
+        long duration =
+                (Optional.ofNullable(
+                                        (ITypedQuantity)
+                                                recordingOptions.get(
+                                                        RecordingOptionsBuilder.KEY_DURATION))
+                                .orElse(UnitLookup.MILLISECOND.quantity(0)))
+                        .longValueIn(UnitLookup.MILLISECOND);
+        long maxSize =
+                (Optional.ofNullable(
+                                        (ITypedQuantity)
+                                                recordingOptions.get(
+                                                        RecordingOptionsBuilder.KEY_MAX_SIZE))
+                                .orElse(UnitLookup.BYTE.quantity(0)))
+                        .longValueIn(UnitLookup.BYTE);
+        long maxAge =
+                (Optional.ofNullable(
+                                        (ITypedQuantity)
+                                                recordingOptions.get(
+                                                        RecordingOptionsBuilder.KEY_MAX_AGE))
+                                .orElse(UnitLookup.MILLISECOND.quantity(0)))
+                        .longValueIn(UnitLookup.MILLISECOND);
+        if (preferredTemplateType.equals(TemplateType.CUSTOM)) {
+            req =
+                    new StartRecordingRequest(
+                            recordingName,
+                            null,
+                            templateService
+                                    .getXml(templateName, preferredTemplateType)
+                                    .orElseThrow()
+                                    .outerHtml(),
+                            duration,
+                            maxSize,
+                            maxAge);
+        } else {
+            req =
+                    new StartRecordingRequest(
+                            recordingName, templateName, null, duration, maxSize, maxAge);
+        }
+        return client.startRecording(req).await().atMost(client.getTimeout());
     }
+
+    public static class UnimplementedException extends IllegalStateException {}
+
+    static record StartRecordingRequest(
+            String name,
+            String localTemplateName,
+            String template,
+            long duration,
+            long maxSize,
+            long maxAge) {}
 }

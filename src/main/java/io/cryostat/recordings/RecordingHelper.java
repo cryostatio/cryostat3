@@ -32,21 +32,21 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutionException;
 import java.util.function.Supplier;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import org.openjdk.jmc.common.unit.IConstrainedMap;
-import org.openjdk.jmc.flightrecorder.configuration.events.EventOptionID;
 import org.openjdk.jmc.flightrecorder.configuration.recording.RecordingOptionsBuilder;
-import org.openjdk.jmc.rjmx.services.jfr.IEventTypeInfo;
 import org.openjdk.jmc.rjmx.services.jfr.IRecordingDescriptor;
 
 import io.cryostat.ConfigProperties;
@@ -85,7 +85,9 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Observes;
 import jakarta.inject.Inject;
 import jakarta.inject.Named;
+import jakarta.transaction.Transactional;
 import jakarta.ws.rs.BadRequestException;
+import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.ServerErrorException;
 import jdk.jfr.RecordingState;
 import org.apache.commons.codec.binary.Base64;
@@ -95,6 +97,15 @@ import org.apache.commons.validator.routines.UrlValidator;
 import org.apache.hc.core5.http.HttpStatus;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
+import org.quartz.Job;
+import org.quartz.JobBuilder;
+import org.quartz.JobDetail;
+import org.quartz.JobExecutionContext;
+import org.quartz.JobExecutionException;
+import org.quartz.JobKey;
+import org.quartz.Scheduler;
+import org.quartz.Trigger;
+import org.quartz.TriggerBuilder;
 import software.amazon.awssdk.core.exception.SdkClientException;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.S3Client;
@@ -133,6 +144,8 @@ public class RecordingHelper {
     @Inject EventOptionsBuilder.Factory eventOptionsBuilderFactory;
     @Inject TargetTemplateService.Factory targetTemplateServiceFactory;
     @Inject S3TemplateService customTemplateService;
+    @Inject Scheduler scheduler;
+    private final List<JobKey> jobs = new CopyOnWriteArrayList<>();
 
     @Inject
     @Named(Producers.BASE64_URL)
@@ -194,6 +207,29 @@ public class RecordingHelper {
     }
 
     @Blocking
+    public void updateRemoteRecordings(Target target) {
+        try {
+            target.activeRecordings.clear();
+            target.persist();
+            List<IRecordingDescriptor> descriptors =
+                    connectionManager.executeConnectedTask(
+                            target, conn -> conn.getService().getAvailableRecordings());
+            for (var descriptor : descriptors) {
+                // TODO is there any metadata to attach here?
+                var recording = ActiveRecording.from(target, descriptor, new Metadata(Map.of()));
+                recording.persist();
+                target.activeRecordings.add(recording);
+            }
+            target.persist();
+        } catch (Exception e) {
+            logger.errorv(
+                    e,
+                    "Failure to synchronize existing target recording state for {0}",
+                    target.connectUrl);
+        }
+    }
+
+    @Blocking
     public ActiveRecording startRecording(
             Target target,
             IConstrainedMap<String> recordingOptions,
@@ -213,17 +249,15 @@ public class RecordingHelper {
                             if (!restart) {
                                 throw new EntityExistsException("Recording", recordingName);
                             }
-                            if (!ActiveRecording.deleteFromTarget(target, recordingName)) {
-                                logger.warnf(
-                                        "Could not delete recording %s from target %s",
-                                        recordingName, target.alias);
-                            }
+                            target.activeRecordings.stream()
+                                    .filter(r -> r.name.equals(recordingName))
+                                    .forEach(this::deleteRecording);
                         });
 
         IRecordingDescriptor desc =
                 connection
                         .getService()
-                        .start(recordingOptions, enableEvents(target, eventTemplate));
+                        .start(recordingOptions, eventTemplate.getName(), eventTemplate.getType());
 
         Map<String, String> labels = metadata.labels();
         labels.put("template.name", eventTemplate.getName());
@@ -236,7 +270,24 @@ public class RecordingHelper {
         target.activeRecordings.add(recording);
         target.persist();
 
-        logger.tracev("Started recording: {0} {1}", target.connectUrl, target.activeRecordings);
+        if (!recording.continuous) {
+            JobDetail jobDetail =
+                    JobBuilder.newJob(StopRecordingJob.class)
+                            .withIdentity(recording.name, target.jvmId)
+                            .build();
+            if (!jobs.contains(jobDetail.getKey())) {
+                Map<String, Object> data = jobDetail.getJobDataMap();
+                data.put("recordingId", recording.id);
+                data.put("archive", archiveOnStop);
+                Trigger trigger =
+                        TriggerBuilder.newTrigger()
+                                .withIdentity(recording.name, target.jvmId)
+                                .usingJobData(jobDetail.getJobDataMap())
+                                .startAt(new Date(System.currentTimeMillis() + recording.duration))
+                                .build();
+                scheduler.scheduleJob(jobDetail, trigger);
+            }
+        }
 
         return recording;
     }
@@ -328,6 +379,59 @@ public class RecordingHelper {
         }
     }
 
+    @Blocking
+    @Transactional
+    public ActiveRecording stopRecording(ActiveRecording recording, boolean archive)
+            throws Exception {
+        var out =
+                connectionManager.executeConnectedTask(
+                        recording.target,
+                        conn -> {
+                            var desc = getDescriptorById(conn, recording.remoteId);
+                            if (desc.isEmpty()) {
+                                throw new NotFoundException();
+                            }
+                            if (!desc.get()
+                                    .getState()
+                                    .equals(
+                                            org.openjdk.jmc.rjmx.services.jfr.IRecordingDescriptor
+                                                    .RecordingState.STOPPED)) {
+                                conn.getService().stop(desc.get());
+                            }
+                            recording.state = RecordingState.STOPPED;
+                            return recording;
+                        });
+        out.persist();
+        if (archive) {
+            saveRecording(out);
+        }
+        return out;
+    }
+
+    @Blocking
+    @Transactional
+    public ActiveRecording stopRecording(ActiveRecording recording) throws Exception {
+        return stopRecording(recording, false);
+    }
+
+    @Blocking
+    @Transactional
+    public ActiveRecording deleteRecording(ActiveRecording recording) {
+        return connectionManager.executeConnectedTask(
+                recording.target,
+                conn -> {
+                    var desc = getDescriptorById(conn, recording.remoteId);
+                    if (desc.isEmpty()) {
+                        throw new NotFoundException();
+                    }
+                    conn.getService().close(desc.get());
+                    recording.target.activeRecordings.remove(recording);
+                    recording.target.persist();
+                    recording.delete();
+                    return recording;
+                });
+    }
+
     public LinkedRecordingDescriptor toExternalForm(ActiveRecording recording) {
         return new LinkedRecordingDescriptor(
                 recording.id,
@@ -358,46 +462,6 @@ public class RecordingHelper {
             return Pair.of(templateName, templateType);
         }
         throw new BadRequestException(eventSpecifier);
-    }
-
-    @Blocking
-    private IConstrainedMap<EventOptionID> enableAllEvents(Target target) throws Exception {
-        return connectionManager.executeConnectedTask(
-                target,
-                connection -> {
-                    EventOptionsBuilder builder = eventOptionsBuilderFactory.create(connection);
-
-                    for (IEventTypeInfo eventTypeInfo :
-                            connection.getService().getAvailableEventTypes()) {
-                        builder.addEvent(
-                                eventTypeInfo.getEventTypeID().getFullKey(), "enabled", "true");
-                    }
-
-                    return builder.build();
-                });
-    }
-
-    @Blocking
-    private IConstrainedMap<EventOptionID> enableEvents(Target target, Template eventTemplate)
-            throws Exception {
-        if (EventTemplates.ALL_EVENTS_TEMPLATE.equals(eventTemplate)) {
-            return enableAllEvents(target);
-        }
-        switch (eventTemplate.getType()) {
-            case TARGET:
-                return targetTemplateServiceFactory
-                        .create(target)
-                        .getEvents(eventTemplate.getName(), eventTemplate.getType())
-                        .orElseThrow();
-            case CUSTOM:
-                return customTemplateService
-                        .getEvents(eventTemplate.getName(), eventTemplate.getType())
-                        .orElseThrow();
-            default:
-                throw new BadRequestException(
-                        String.format(
-                                "Invalid/unknown event template %s", eventTemplate.getName()));
-        }
     }
 
     @Blocking
@@ -448,8 +512,8 @@ public class RecordingHelper {
         }
     }
 
-    static Optional<IRecordingDescriptor> getDescriptorById(
-            JFRConnection connection, long remoteId) {
+    @Blocking
+    Optional<IRecordingDescriptor> getDescriptorById(JFRConnection connection, long remoteId) {
         try {
             return connection.getService().getAvailableRecordings().stream()
                     .filter(r -> remoteId == r.getId())
@@ -459,12 +523,14 @@ public class RecordingHelper {
         }
     }
 
-    static Optional<IRecordingDescriptor> getDescriptor(
+    @Blocking
+    Optional<IRecordingDescriptor> getDescriptor(
             JFRConnection connection, ActiveRecording activeRecording) {
         return getDescriptorById(connection, activeRecording.remoteId);
     }
 
-    public static Optional<IRecordingDescriptor> getDescriptorByName(
+    @Blocking
+    public Optional<IRecordingDescriptor> getDescriptorByName(
             JFRConnection connection, String recordingName) {
         try {
             return connection.getService().getAvailableRecordings().stream()
@@ -539,7 +605,7 @@ public class RecordingHelper {
         String key = archivedRecordingKey(recording.target.jvmId, filename);
         String multipartId = null;
         List<Pair<Integer, String>> parts = new ArrayList<>();
-        try (var stream = remoteRecordingStreamFactory.open(recording);
+        try (var stream = getActiveInputStream(recording);
                 var ch = Channels.newChannel(stream)) {
             ByteBuffer buf = ByteBuffer.allocate(20 * mib);
             CreateMultipartUploadRequest.Builder builder =
@@ -757,6 +823,17 @@ public class RecordingHelper {
         return read;
     }
 
+    @Blocking
+    void safeCloseRecording(JFRConnection conn, IRecordingDescriptor rec) {
+        try {
+            conn.getService().close(rec);
+        } catch (org.openjdk.jmc.rjmx.services.jfr.FlightRecorderException e) {
+            logger.error("Failed to stop remote recording", e);
+        } catch (Exception e) {
+            logger.error("Unexpected exception", e);
+        }
+    }
+
     /* Archived Recording Helpers */
     @Blocking
     public void deleteArchivedRecording(String jvmId, String filename) {
@@ -958,6 +1035,25 @@ public class RecordingHelper {
                 }
             }
             throw new IllegalArgumentException("Invalid recording replace value: " + replace);
+        }
+    }
+
+    static class StopRecordingJob implements Job {
+
+        @Inject RecordingHelper recordingHelper;
+        @Inject Logger logger;
+
+        @Override
+        @Transactional
+        public void execute(JobExecutionContext ctx) throws JobExecutionException {
+            var recordingId = (long) ctx.getJobDetail().getJobDataMap().get("recordingId");
+            var archive = (boolean) ctx.getJobDetail().getJobDataMap().get("archive");
+            try {
+                recordingHelper.stopRecording(
+                        ActiveRecording.find("id", recordingId).singleResult(), archive);
+            } catch (Exception e) {
+                throw new JobExecutionException(e);
+            }
         }
     }
 

@@ -249,10 +249,11 @@ public class RuleService {
         try {
             quartz.scheduleJob(jobDetail, trigger);
         } catch (SchedulerException e) {
-            logger.infov(
+            logger.errorv(
+                    e,
                     "Failed to schedule archival job for rule {0} in target {1}",
-                    rule.name, target.alias);
-            logger.error(e);
+                    rule.name,
+                    target.alias);
         }
         jobs.add(jobDetail.getKey());
     }

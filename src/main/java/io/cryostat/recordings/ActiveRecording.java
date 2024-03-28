@@ -31,7 +31,6 @@ import io.cryostat.ws.MessagingServer;
 import io.cryostat.ws.Notification;
 
 import io.quarkus.hibernate.orm.panache.PanacheEntity;
-import io.smallrye.common.annotation.Blocking;
 import io.vertx.mutiny.core.eventbus.EventBus;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -43,11 +42,8 @@ import jakarta.persistence.ManyToOne;
 import jakarta.persistence.PostPersist;
 import jakarta.persistence.PostRemove;
 import jakarta.persistence.PostUpdate;
-import jakarta.persistence.PreRemove;
-import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
-import jakarta.transaction.Transactional;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.PositiveOrZero;
@@ -142,27 +138,6 @@ public class ActiveRecording extends PanacheEntity {
         return find("name", name).singleResult();
     }
 
-    @Transactional
-    public static boolean deleteFromTarget(Target target, String recordingName) {
-        Optional<ActiveRecording> recording =
-                target.activeRecordings.stream()
-                        .filter(r -> r.name.equals(recordingName))
-                        .findFirst();
-        boolean found = recording.isPresent();
-        if (found) {
-            Logger.getLogger(ActiveRecording.class)
-                    .debugv("Found and deleting match: {0} / {1}", target.alias, recording.get());
-            recording.get().delete();
-            getEntityManager().flush();
-        } else {
-            Logger.getLogger(ActiveRecording.class)
-                    .debugv(
-                            "No match found for recording {0} in target {1}",
-                            recordingName, target.alias);
-        }
-        return found;
-    }
-
     @ApplicationScoped
     static class Listener {
 
@@ -181,44 +156,6 @@ public class ActiveRecording extends PanacheEntity {
                             ActiveRecordingEvent.Payload.of(recordingHelper, activeRecording)));
         }
 
-        @PreUpdate
-        @Blocking
-        public void preUpdate(ActiveRecording activeRecording) throws Exception {
-            if (RecordingState.STOPPED.equals(activeRecording.state)) {
-                try {
-                    connectionManager.executeConnectedTask(
-                            activeRecording.target,
-                            conn -> {
-                                RecordingHelper.getDescriptorById(conn, activeRecording.remoteId)
-                                        .ifPresent(
-                                                d -> {
-                                                    // this connection can fail if we are removing
-                                                    // this recording as a cascading operation after
-                                                    // the owner target was lost. It isn't too
-                                                    // important in that case that we are unable to
-                                                    // connect to the target and close the actual
-                                                    // recording, because the target probably went
-                                                    // offline or we otherwise just can't reach it.
-                                                    try {
-                                                        if (!d.getState()
-                                                                .equals(
-                                                                        IRecordingDescriptor
-                                                                                .RecordingState
-                                                                                .STOPPED)) {
-                                                            conn.getService().stop(d);
-                                                        }
-                                                    } catch (Exception e) {
-                                                        throw new RuntimeException(e);
-                                                    }
-                                                });
-                                return null;
-                            });
-                } catch (Exception e) {
-                    logger.error("Failed to stop remote recording", e);
-                }
-            }
-        }
-
         @PostUpdate
         public void postUpdate(ActiveRecording activeRecording) {
             if (RecordingState.STOPPED.equals(activeRecording.state)) {
@@ -229,36 +166,6 @@ public class ActiveRecording extends PanacheEntity {
                         new ActiveRecordingEvent(
                                 Recordings.RecordingEventCategory.ACTIVE_STOPPED,
                                 ActiveRecordingEvent.Payload.of(recordingHelper, activeRecording)));
-            }
-        }
-
-        @PreRemove
-        @Blocking
-        public void preRemove(ActiveRecording activeRecording) throws Exception {
-            try {
-                activeRecording.target.activeRecordings.remove(activeRecording);
-                connectionManager.executeConnectedTask(
-                        activeRecording.target,
-                        conn -> {
-                            // this connection can fail if we are removing this recording as a
-                            // cascading operation after the owner target was lost. It isn't too
-                            // important in that case that we are unable to connect to the target
-                            // and close the actual recording, because the target probably went
-                            // offline or we otherwise just can't reach it.
-                            try {
-                                RecordingHelper.getDescriptor(conn, activeRecording)
-                                        .ifPresent(
-                                                rec ->
-                                                        Recordings.safeCloseRecording(
-                                                                conn, rec, logger));
-                            } catch (Exception e) {
-                                logger.info(e);
-                            }
-                            return null;
-                        });
-            } catch (Exception e) {
-                logger.error(e);
-                throw e;
             }
         }
 

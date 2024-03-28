@@ -89,6 +89,8 @@ public class DiscoveryPlugin extends PanacheEntityBase {
                 return;
             }
             if (plugin.callback == null) {
+                plugin.realm.delete();
+                plugin.delete();
                 throw new IllegalArgumentException();
             }
             try {
@@ -97,8 +99,12 @@ public class DiscoveryPlugin extends PanacheEntityBase {
                         "Registered discovery plugin: {0} @ {1}",
                         plugin.realm.name, plugin.callback);
             } catch (URISyntaxException e) {
+                plugin.realm.delete();
+                plugin.delete();
                 throw new IllegalArgumentException(e);
             } catch (Exception e) {
+                plugin.realm.delete();
+                plugin.delete();
                 logger.error("Discovery Plugin ping failed", e);
                 throw e;
             }
