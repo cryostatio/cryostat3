@@ -605,7 +605,7 @@ public class RecordingHelper {
         String key = archivedRecordingKey(recording.target.jvmId, filename);
         String multipartId = null;
         List<Pair<Integer, String>> parts = new ArrayList<>();
-        try (var stream = remoteRecordingStreamFactory.open(recording);
+        try (var stream = getActiveInputStream(recording);
                 var ch = Channels.newChannel(stream)) {
             ByteBuffer buf = ByteBuffer.allocate(20 * mib);
             CreateMultipartUploadRequest.Builder builder =

@@ -253,7 +253,7 @@ public class TargetConnectionManager {
      *     cache, true if it is still active and was refreshed
      */
     public boolean markConnectionInUse(Target target) {
-        return connections.getIfPresent(target.connectUrl) != null;
+        return connections.synchronous().getIfPresent(target.connectUrl) != null;
     }
 
     private void closeConnection(URI connectUrl, JFRConnection connection, RemovalCause cause) {
