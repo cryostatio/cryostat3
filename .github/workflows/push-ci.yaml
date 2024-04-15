@@ -56,6 +56,8 @@ jobs:
     if: ${{ github.repository_owner == 'cryostatio' }}
     steps:
     - name: Install qemu
+      if: ${{ inputs.build-arch != 'amd64' }}
+      continue-on-error: true
       run: |
         sudo apt-get update
         sudo apt-get install -y qemu-user-static
@@ -110,6 +112,8 @@ jobs:
     - name: Delete local integration test image
       run: podman rmi ${{ env.CI_IMG }}:dev ${{ env.CI_IMG }}:${{ env.IMAGE_VERSION }}
       continue-on-error: true
+    - name: Clear dockerignore
+      run: echo '' > .dockerignore
     - name: Build container images and manifest
       if: ${{ matrix.java == '17' && github.repository_owner == 'cryostatio' }}
       id: buildah-build
@@ -119,8 +123,8 @@ jobs:
         archs: amd64, arm64
         # tags: ${{ env.IMAGE_VERSION }} ${{ github.ref == 'refs/heads/main' && 'latest' || '' }}
         tags: ${{ env.IMAGE_VERSION }}
-        containerfiles: |
-          ./src/main/docker/Dockerfile.jvm
+        extra-args: --ulimit nofile=4096:4096
+        containerfile: ./src/main/docker/Dockerfile.builder
     - name: Push to quay.io
       id: push-to-quay
       uses: redhat-actions/push-to-registry@v2
