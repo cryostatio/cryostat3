@@ -123,9 +123,11 @@ jobs:
         archs: amd64, arm64
         # tags: ${{ env.IMAGE_VERSION }} ${{ github.ref == 'refs/heads/main' && 'latest' || '' }}
         tags: ${{ env.IMAGE_VERSION }}
-        extra-args: >-
-          --ulimit nofile=4096:4096
-          --ignorefile .dockerignore.builder
+        extra-args: |
+          --ulimit
+          nofile=4096:4096
+          --ignorefile
+          .dockerignore.builder
         containerfile: ./src/main/docker/Dockerfile.builder
     - name: Push to quay.io
       id: push-to-quay
