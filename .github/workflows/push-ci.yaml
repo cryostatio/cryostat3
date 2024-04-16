@@ -112,8 +112,6 @@ jobs:
     - name: Delete local integration test image
       run: podman rmi ${{ env.CI_IMG }}:dev ${{ env.CI_IMG }}:${{ env.IMAGE_VERSION }}
       continue-on-error: true
-    - name: Clear dockerignore
-      run: echo '' > .dockerignore
     - name: Build container images and manifest
       if: ${{ matrix.java == '17' && github.repository_owner == 'cryostatio' }}
       id: buildah-build
