@@ -1,0 +1,24 @@
+version: "3"
+services:
+  minecraft-server:
+    depends_on:
+      cryostat:
+        condition: service_healthy
+    image: ${MINECRAFT_TEST_IMAGE:-localhost/minecraft-server:latest}
+    build:
+      context: .
+      dockerfile: ./Containerfile.minecraft
+    hostname: minecraft
+    ports:
+      - "7091"
+      - "9494"
+    environment:
+      CRYOSTAT_AGENT_APP_NAME: minecraft
+      CRYOSTAT_AGENT_WEBSERVER_HOST: minecraft
+      CRYOSTAT_AGENT_WEBSERVER_PORT: 9494
+      CRYOSTAT_AGENT_CALLBACK: http://minecraft:9494/
+      CRYOSTAT_AGENT_BASEURI: http://${CRYOSTAT_HTTP_HOST}:8080/
+      CRYOSTAT_AGENT_BASEURI_RANGE: public
+      CRYOSTAT_AGENT_SSL_TRUST_ALL: "true"
+      CRYOSTAT_AGENT_SSL_VERIFY_HOSTNAME: "false"
+      CRYOSTAT_AGENT_AUTHORIZATION: Basic dXNlcjpwYXNz # "Basic $(echo -n user:pass | base64)"
