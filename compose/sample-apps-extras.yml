@@ -22,3 +22,8 @@ services:
       CRYOSTAT_AGENT_SSL_TRUST_ALL: "true"
       CRYOSTAT_AGENT_SSL_VERIFY_HOSTNAME: "false"
       CRYOSTAT_AGENT_AUTHORIZATION: Basic dXNlcjpwYXNz # "Basic $(echo -n user:pass | base64)"
+      EULA: "true"
+      ENABLE_JMX: "true"
+      JMX_HOST: minecraft
+      JMX_PORT: "7091"
+      JVM_OPTS: -javaagent:/opt/cryostat/agent.jar

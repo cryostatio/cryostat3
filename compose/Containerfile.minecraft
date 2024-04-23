@@ -19,6 +19,3 @@ FROM docker.io/itzg/minecraft-server:java17-jdk
 ARG CRYOSTAT_AGENT_VERSION
 RUN mkdir -p /opt/cryostat
 COPY --from=agentloader /opt/cryostat/cryostat-agent-${CRYOSTAT_AGENT_VERSION}-shaded.jar /opt/cryostat/agent.jar
-ENV EULA=true \
-    ENABLE_JMX=true \
-    JVM_OPTS="-javaagent:/opt/cryostat/agent.jar"

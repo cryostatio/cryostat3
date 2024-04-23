@@ -23,6 +23,7 @@ CRYOSTAT_HTTP_PORT=${CRYOSTAT_HTTP_PORT:-8080}
 USE_PROXY=${USE_PROXY:-true}
 DEPLOY_GRAFANA=${DEPLOY_GRAFANA:-true}
 DRY_RUN=${DRY_RUN:-false}
+upFlags=()
 
 display_usage() {
     echo "Usage:"
@@ -63,6 +64,7 @@ while getopts "hs:prGtTOVXcbn" opt; do
             ;;
         T)
             FILES+=("${DIR}/compose/sample-apps-extras.yml")
+            upFlags+=("--build")
             ;;
         O)
             PULL_IMAGES=false
@@ -306,6 +308,7 @@ fi
 docker-compose \
     "${CMD[@]}" \
     up \
+        "${upFlags[@]}" \
         --renew-anon-volumes \
         --remove-orphans \
         --abort-on-container-exit
