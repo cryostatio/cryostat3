@@ -46,3 +46,5 @@ certs/*.p12
 certs/*.pass
 *.jfr
 .quarkus/
+compose/auth_certs/*.key
+compose/auth_certs/*.pem
