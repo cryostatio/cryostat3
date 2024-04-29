@@ -6,6 +6,7 @@ if ! command -v yq >/dev/null 2>&1 ; then
 fi
 
 DIR="$(dirname "$(readlink -f "$0")")"
+export DIR
 
 FILES=(
     "${DIR}/compose/db.yml"
@@ -181,7 +182,9 @@ cleanup() {
         down "${downFlags[@]}"
     if [ "${USE_PROXY}" = "true" ]; then
         ${container_engine} rm proxy_cfg_helper || true
+        ${container_engine} rm proxy_certs_helper || true
         ${container_engine} volume rm auth_proxy_cfg || true
+        ${container_engine} volume rm auth_proxy_certs || true
     fi
     if [ "${s3}" = "localstack" ]; then
         ${container_engine} rm localstack_cfg_helper || true
@@ -212,6 +215,18 @@ createProxyCfgVolume() {
 }
 if [ "${USE_PROXY}" = "true" ]; then
     createProxyCfgVolume
+fi
+
+createProxyCertsVolume() {
+    "${container_engine}" volume create auth_proxy_certs
+    "${container_engine}" container create --name proxy_certs_helper -v auth_proxy_certs:/certs busybox
+    chmod 777 "${DIR}/compose/auth_certs/private.key"
+    chmod 777 "${DIR}/compose/auth_certs/certificate.pem"
+    "${container_engine}" cp "${DIR}/compose/auth_certs/certificate.pem" proxy_certs_helper:/certs/certificate.pem
+    "${container_engine}" cp "${DIR}/compose/auth_certs/private.key" proxy_certs_helper:/certs/private.key
+}
+if [ "${USE_PROXY}" = "true" ]; then
+    createProxyCertsVolume
 fi
 
 createLocalstackCfgVolume() {

@@ -1,5 +1,10 @@
 server:
-  BindAddress: http://0.0.0.0:8080
+  SecureBindAddress: https://0.0.0.0:8080
+  TLS:
+    key:
+      fromFile: /certs/private.key
+    cert: 
+      fromFile: /certs/certificate.pem
 upstreamConfig:
   proxyRawPath: true
   upstreams:
