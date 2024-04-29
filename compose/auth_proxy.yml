@@ -47,10 +47,9 @@ services:
       OAUTH2_PROXY_HTPASSWD_USER_GROUP: write
       OAUTH2_PROXY_REDIRECT_URL: http://auth:8080/oauth2/callback
       OAUTH2_PROXY_COOKIE_SECRET: __24_BYTE_COOKIE_SECRET_
-      OAUTH2_PROXY_FORCE_HTTPS: "false"
     restart: unless-stopped
     healthcheck:
-      test: wget -q --spider https://localhost:8080/ping || exit 1
+      test: wget -q --spider http://localhost:8080/ping || exit 1
       interval: 10s
       retries: 3
       start_period: 30s
