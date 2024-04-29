@@ -5,13 +5,13 @@ services:
       - "${CRYOSTAT_HTTP_PORT}"
     environment:
       CRYOSTAT_HTTP_PROXY_HOST: auth
-      CRYOSTAT_HTTP_PROXY_PORT: '8080'
+      CRYOSTAT_HTTP_PROXY_PORT: '8443'
       CRYOSTAT_HTTP_PROXY_TLS_ENABLED: "true"
       QUARKUS_HTTP_PROXY_PROXY_ADDRESS_FORWARDING: 'true'
       QUARKUS_HTTP_PROXY_ALLOW_X_FORWARDED: 'true'
       QUARKUS_HTTP_PROXY_ENABLE_FORWARDED_HOST: 'true'
       QUARKUS_HTTP_PROXY_ENABLE_FORWARDED_PREFIX: 'true'
-      QUARKUS_HTTP_PROXY_TRUSTED_PROXIES: 127.0.0.1:${CRYOSTAT_HTTP_PORT}
+      # QUARKUS_HTTP_PROXY_TRUSTED_PROXIES: auth # by default all are trusted
     healthcheck:
       test: curl --fail http://cryostat:8181/health/liveness || exit 1
       interval: 10s
@@ -39,17 +39,15 @@ services:
     hostname: auth
     ports:
       - "8080:8080"
+      - "8443:8443"
     labels:
       kompose.service.expose: "auth"
     environment:
       OAUTH2_PROXY_HTPASSWD_FILE: /tmp/auth_proxy_htpasswd
       OAUTH2_PROXY_HTPASSWD_USER_GROUP: write
-      OAUTH2_PROXY_REDIRECT_URL: https://localhost:8080/oauth2/callback
-      OAUTH2_PROXY_HTTPS_ADDRESS: 8080
+      OAUTH2_PROXY_REDIRECT_URL: http://auth:8080/oauth2/callback
       OAUTH2_PROXY_COOKIE_SECRET: __24_BYTE_COOKIE_SECRET_
-      OAUTH2_PROXY_COOKIE_HTTPONLY: "false"
-      OAUTH2_PROXY_SSL_INSECURE_SKIP_VERIFY: "true"
-      # OAUTH2_PROXY_SKIP_AUTH_ROUTES: .*
+      OAUTH2_PROXY_FORCE_HTTPS: "false"
     restart: unless-stopped
     healthcheck:
       test: wget -q --spider https://localhost:8080/ping || exit 1
