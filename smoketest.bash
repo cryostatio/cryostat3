@@ -221,11 +221,11 @@ createProxyCertsVolume() {
     "${container_engine}" volume create auth_proxy_certs
     "${container_engine}" container create --name proxy_certs_helper -v auth_proxy_certs:/certs busybox
     if [ -f "${DIR}/compose/auth_certs/certificate.pem" ] && [ -f "${DIR}/compose/auth_certs/private.key" ]; then
-        chmod 644 "${DIR}/compose/auth_certs/private.key"
+        chmod 640 "${DIR}/compose/auth_certs/private.key"
         "${container_engine}" cp "${DIR}/compose/auth_certs/certificate.pem" proxy_certs_helper:/certs/certificate.pem
         "${container_engine}" cp "${DIR}/compose/auth_certs/private.key" proxy_certs_helper:/certs/private.key
     else
-        echo "Unable to find a certificate and key to allow oauth2_proxy to enable TLS connections"
+        echo "Did you run auth_certs/generate.sh?"
         exit 2
     fi
 }
