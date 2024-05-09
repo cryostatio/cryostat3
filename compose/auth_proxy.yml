@@ -5,7 +5,7 @@ services:
       - "${CRYOSTAT_HTTP_PORT}"
     environment:
       CRYOSTAT_HTTP_PROXY_HOST: auth
-      CRYOSTAT_HTTP_PROXY_PORT: '8443'
+      CRYOSTAT_HTTP_PROXY_PORT: '8080'
       CRYOSTAT_HTTP_PROXY_TLS_ENABLED: "true"
       QUARKUS_HTTP_PROXY_PROXY_ADDRESS_FORWARDING: 'true'
       QUARKUS_HTTP_PROXY_ALLOW_X_FORWARDED: 'true'
@@ -45,7 +45,7 @@ services:
     environment:
       OAUTH2_PROXY_HTPASSWD_FILE: /tmp/auth_proxy_htpasswd
       OAUTH2_PROXY_HTPASSWD_USER_GROUP: write
-      OAUTH2_PROXY_REDIRECT_URL: http://auth:8080/oauth2/callback
+      OAUTH2_PROXY_REDIRECT_URL: http://localhost:8080/oauth2/callback
       OAUTH2_PROXY_COOKIE_SECRET: __24_BYTE_COOKIE_SECRET_
     restart: unless-stopped
     healthcheck:
