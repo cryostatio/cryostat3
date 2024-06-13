@@ -23,6 +23,7 @@ CRYOSTAT_HTTP_PORT=${CRYOSTAT_HTTP_PORT:-8080}
 USE_PROXY=${USE_PROXY:-true}
 DEPLOY_GRAFANA=${DEPLOY_GRAFANA:-true}
 DRY_RUN=${DRY_RUN:-false}
+upFlags=()
 
 display_usage() {
     echo "Usage:"
@@ -33,6 +34,7 @@ display_usage() {
     echo -e "\t-G\t\t\t\t\t\texclude Grafana dashboard and jfr-datasource from deployment."
     echo -e "\t-r\t\t\t\t\t\tconfigure a cryostat-Reports sidecar instance"
     echo -e "\t-t\t\t\t\t\t\tinclude sample applications for Testing."
+    echo -e "\t-T\t\t\t\t\t\tinclude additional sample applications for Testing."
     echo -e "\t-V\t\t\t\t\t\tdo not discard data storage Volumes on exit."
     echo -e "\t-X\t\t\t\t\t\tdeploy additional development aid tools."
     echo -e "\t-c [podman|docker]\t\t\t\tUse Podman or Docker Container Engine (default \"podman\")."
@@ -42,7 +44,7 @@ display_usage() {
 
 s3=seaweed
 ce=podman
-while getopts "hs:prGtOVXcbn" opt; do
+while getopts "hs:prGtTOVXcbn" opt; do
     case $opt in
         h)
             display_usage
@@ -59,6 +61,10 @@ while getopts "hs:prGtOVXcbn" opt; do
             ;;
         t)
             FILES+=("${DIR}/compose/sample-apps.yml")
+            ;;
+        T)
+            FILES+=("${DIR}/compose/sample-apps-extras.yml")
+            upFlags+=("--build")
             ;;
         O)
             PULL_IMAGES=false
@@ -322,6 +328,7 @@ fi
 docker-compose \
     "${CMD[@]}" \
     up \
+        "${upFlags[@]}" \
         --renew-anon-volumes \
         --remove-orphans \
         --abort-on-container-exit
