@@ -27,3 +27,10 @@ providers:
     clientId: CLIENT_ID
     clientSecret: CLIENT_SECRET
     provider: google
+injectRequestHeaders:
+  - name: "X-Forwarded-Proto"
+    values:
+      - fromEnv: PROXY_PROTOCOL
+  - name: "X-Forwarded-Port"
+    values:
+      - fromEnv: PROXY_PORT
