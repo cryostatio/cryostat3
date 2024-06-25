@@ -1,6 +1,5 @@
 server:
-  BindAddress: http://0.0.0.0:8080
-  SecureBindAddress: :8443
+  SecureBindAddress: 0.0.0.0:8443
   TLS:
     Key:
       fromFile: /certs/private.key
