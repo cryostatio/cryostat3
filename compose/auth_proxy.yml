@@ -5,7 +5,7 @@ services:
       - "${CRYOSTAT_HTTP_PORT}"
     environment:
       CRYOSTAT_HTTP_PROXY_HOST: auth
-      CRYOSTAT_HTTP_PROXY_PORT: '8443'
+      CRYOSTAT_HTTP_PROXY_PORT: "8080"
       CRYOSTAT_HTTP_PROXY_TLS_ENABLED: "true"
       QUARKUS_HTTP_PROXY_PROXY_ADDRESS_FORWARDING: "true"
       QUARKUS_HTTP_PROXY_ALLOW_X_FORWARDED: "true"
@@ -33,26 +33,28 @@ services:
           cpus: "0.1"
           memory: 32m
     image: ${OAUTH2_PROXY_IMAGE:-quay.io/oauth2-proxy/oauth2-proxy:latest}
-    command: --alpha-config=/tmp/auth_proxy_alpha_config.yaml
+    command:
+      - --alpha-config=/tmp/auth_proxy_alpha_config.yaml
     volumes:
       - auth_proxy_cfg:/tmp
       - auth_proxy_certs:/certs
     hostname: auth
     ports:
+      - "8080:8080"
       - "8443:8443"
     labels:
       kompose.service.expose: "auth"
     environment:
       OAUTH2_PROXY_HTPASSWD_FILE: /tmp/auth_proxy_htpasswd
       OAUTH2_PROXY_HTPASSWD_USER_GROUP: write
-      OAUTH2_PROXY_REDIRECT_URL: https://localhost:8443/oauth2/callback
+      OAUTH2_PROXY_REDIRECT_URL: http://localhost:8080/oauth2/callback
       OAUTH2_PROXY_COOKIE_SECRET: __24_BYTE_COOKIE_SECRET_
-      OAUTH2_PROXY_SKIP_AUTH_ROUTES: ^/health.*
-      PROXY_PROTOCOL: https
-      PROXY_PORT: 8443
+      OAUTH2_PROXY_SKIP_AUTH_ROUTES: "^/health(/liveness)?$$"
+      PROXY_PROTOCOL: http
+      PROXY_PORT: 8080
     restart: unless-stopped
     healthcheck:
-      test: wget -q --spider https://auth:8443/ping || exit 1
+      test: wget -q --spider http://localhost:8080/ping || exit 1
       interval: 10s
       retries: 3
       start_period: 30s

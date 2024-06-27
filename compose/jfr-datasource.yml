@@ -2,7 +2,7 @@ version: "3"
 services:
   cryostat:
     environment:
-      - GRAFANA_DATASOURCE_URL=https://jfr-datasource:8443
+      - GRAFANA_DATASOURCE_URL=http://jfr-datasource:8080
   jfr-datasource:
     image: ${JFR_DATASOURCE_IMAGE:-quay.io/cryostat/jfr-datasource:latest}
     hostname: jfr-datasource
@@ -10,7 +10,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.4'
+          cpus: "0.4"
           memory: 512m
     expose:
       - "8080"
@@ -30,7 +30,7 @@ services:
         -Dcom.sun.management.jmxremote.ssl=false
         -Dcom.sun.management.jmxremote.local.only=false
     healthcheck:
-      test: curl --fail https://localhost:8443/ || exit 1
+      test: curl --fail http://localhost:8080/ || exit 1
       retries: 3
       interval: 30s
       start_period: 30s

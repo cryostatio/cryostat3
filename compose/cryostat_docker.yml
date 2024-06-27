@@ -9,7 +9,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '2'
+          cpus: "2"
           memory: 512m
     image: ${CRYOSTAT_IMAGE:-quay.io/cryostat/cryostat:latest}
     volumes:

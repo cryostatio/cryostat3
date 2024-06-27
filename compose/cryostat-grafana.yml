@@ -11,13 +11,13 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.1'
+          cpus: "0.1"
           memory: 256m
     environment:
       - GF_INSTALL_PLUGINS=grafana-simple-json-datasource
       - GF_AUTH_ANONYMOUS_ENABLED=true
       - GF_SERVER_DOMAIN=localhost
-      - GF_SERVER_ROOT_URL=https://localhost:8443/grafana/
+      - GF_SERVER_ROOT_URL=http://localhost:8080/grafana/
       - GF_SERVER_SERVE_FROM_SUB_PATH=true
       - JFR_DATASOURCE_URL=http://jfr-datasource:8080
     expose:

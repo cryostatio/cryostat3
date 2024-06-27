@@ -5,4 +5,4 @@ services:
       - "${STORAGE_PORT}:${STORAGE_PORT}"
   cryostat:
     environment:
-      STORAGE_EXT_URL: ''
+      STORAGE_EXT_URL: ""
