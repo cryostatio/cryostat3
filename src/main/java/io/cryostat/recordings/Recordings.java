@@ -805,7 +805,12 @@ public class Recordings {
     @RolesAllowed("write")
     public Response uploadArchivedToGrafanaBeta(
             @RestPath String connectUrl, @RestPath String filename) throws Exception {
-        var jvmId = Target.getTargetByConnectUrl(URI.create(connectUrl)).jvmId;
+        String jvmId;
+        if ("uploads".equals(connectUrl)) {
+            jvmId = "uploads";
+        } else {
+            jvmId = Target.getTargetByConnectUrl(URI.create(connectUrl)).jvmId;
+        }
         return Response.status(RestResponse.Status.PERMANENT_REDIRECT)
                 .location(
                         URI.create(
