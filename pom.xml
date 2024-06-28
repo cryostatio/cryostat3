@@ -49,7 +49,7 @@
     <org.apache.commons.validator.version>1.7</org.apache.commons.validator.version>
     <org.projectnessie.cel.bom.version>0.4.4</org.projectnessie.cel.bom.version>
     <com.google.protobuf-java.version>3.25.2</com.google.protobuf-java.version>
-    <com.nimbusds.jose.jwt.version>9.37.3</com.nimbusds.jose.jwt.version>
+    <com.nimbusds.jose.jwt.version>9.40</com.nimbusds.jose.jwt.version>
     <org.testcontainers.bom.version>1.19.8</org.testcontainers.bom.version>
     <quarkus.platform.artifact-id>quarkus-bom</quarkus.platform.artifact-id>
     <quarkus.platform.group-id>io.quarkus.platform</quarkus.platform.group-id>
