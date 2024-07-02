@@ -40,11 +40,12 @@ display_usage() {
     echo -e "\t-c [podman|docker]\t\t\t\tUse Podman or Docker Container Engine (default \"podman\")."
     echo -e "\t-b\t\t\t\t\t\tOpen a Browser tab for each running service's first mapped port (ex. auth proxy login, database viewer)"
     echo -e "\t-n\t\t\t\t\t\tDo Not apply configuration changes, instead emit the compose YAML that would have been used to stdout."
+    echo -e "\t-k\t\t\t\t\t\tEnable http protocol"
 }
 
 s3=seaweed
 ce=podman
-while getopts "hs:prGtOVXcbn" opt; do
+while getopts "hs:prGtOVXcbnk" opt; do
     case $opt in
         h)
             display_usage
@@ -83,6 +84,9 @@ while getopts "hs:prGtOVXcbn" opt; do
             ;;
         n)
             DRY_RUN=true
+            ;;
+        k)
+            USE_HTTPS=false
             ;;
         *)
             display_usage
