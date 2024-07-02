@@ -243,7 +243,7 @@ createProxyCertsVolume() {
         exit 2
     fi
 }
-if [ "${USE_PROXY}" = "true" ] && [ "${USE_HTTPS}" = "true" ]; then
+if [ "${USE_PROXY}" = "true" ]; then
     createProxyCertsVolume
 fi
 
