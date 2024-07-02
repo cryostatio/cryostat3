@@ -5,7 +5,7 @@ services:
       - "${CRYOSTAT_HTTP_PORT}"
     environment:
       CRYOSTAT_HTTP_PROXY_HOST: auth
-      CRYOSTAT_HTTP_PROXY_PORT: "8080"
+      CRYOSTAT_HTTP_PROXY_PORT: "${CRYOSTAT_PROXY_PORT}"
       CRYOSTAT_HTTP_PROXY_TLS_ENABLED: "true"
       QUARKUS_HTTP_PROXY_PROXY_ADDRESS_FORWARDING: "true"
       QUARKUS_HTTP_PROXY_ALLOW_X_FORWARDED: "true"
@@ -40,21 +40,20 @@ services:
       - auth_proxy_certs:/certs
     hostname: auth
     ports:
-      - "8080:8080"
-      - "8443:8443"
+      - "${CRYOSTAT_PROXY_PORT}:${CRYOSTAT_PROXY_PORT}"
     labels:
       kompose.service.expose: "auth"
     environment:
       OAUTH2_PROXY_HTPASSWD_FILE: /tmp/auth_proxy_htpasswd
       OAUTH2_PROXY_HTPASSWD_USER_GROUP: write
-      OAUTH2_PROXY_REDIRECT_URL: http://localhost:8080/oauth2/callback
+      OAUTH2_PROXY_REDIRECT_URL: ${CRYOSTAT_PROXY_PROTOCOL}://localhost:${CRYOSTAT_PROXY_PORT}/oauth2/callback
       OAUTH2_PROXY_COOKIE_SECRET: __24_BYTE_COOKIE_SECRET_
       OAUTH2_PROXY_SKIP_AUTH_ROUTES: "^/health(/liveness)?$$"
-      PROXY_PROTOCOL: http
-      PROXY_PORT: 8080
+      CRYOSTAT_PROXY_PROTOCOL: ${CRYOSTAT_PROXY_PROTOCOL}
+      CRYOSTAT_PROXY_PORT: ${CRYOSTAT_PROXY_PORT}
     restart: unless-stopped
     healthcheck:
-      test: wget -q --spider http://localhost:8080/ping || exit 1
+      test: wget -q --spider ${CRYOSTAT_PROXY_PROTOCOL}://localhost:${CRYOSTAT_PROXY_PORT}/ping || exit 1
       interval: 10s
       retries: 3
       start_period: 30s

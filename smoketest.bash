@@ -24,6 +24,7 @@ CRYOSTAT_HTTP_PORT=${CRYOSTAT_HTTP_PORT:-8080}
 USE_PROXY=${USE_PROXY:-true}
 DEPLOY_GRAFANA=${DEPLOY_GRAFANA:-true}
 DRY_RUN=${DRY_RUN:-false}
+USE_HTTPS=${USE_HTTPS:-false}
 
 display_usage() {
     echo "Usage:"
@@ -97,11 +98,18 @@ if [ "${DEPLOY_GRAFANA}" = "true" ]; then
     )
 fi
 
-
+CRYOSTAT_PROXY_PORT=8080
+CRYOSTAT_PROXY_PROTOCOL=http
+AUTH_PROXY_ALPHA_CONFIG_FILE=auth_proxy_alpha_config_http
 if [ "${USE_PROXY}" = "true" ]; then
     FILES+=("${DIR}/compose/auth_proxy.yml")
     CRYOSTAT_HTTP_HOST=auth
     CRYOSTAT_HTTP_PORT=8181
+    if [ "${USE_HTTPS}" = "true" ]; then
+        CRYOSTAT_PROXY_PORT=8443
+        CRYOSTAT_PROXY_PROTOCOL=https
+        AUTH_PROXY_ALPHA_CONFIG_FILE=auth_proxy_alpha_config_https
+    fi
 else
     FILES+=("${DIR}/compose/no_proxy.yml")
     if [ "${s3}" != "none" ]; then
@@ -116,6 +124,8 @@ export CRYOSTAT_HTTP_HOST
 export CRYOSTAT_HTTP_PORT
 export GRAFANA_DASHBOARD_EXT_URL
 export DATABASE_GENERATION
+export CRYOSTAT_PROXY_PORT
+export CRYOSTAT_PROXY_PROTOCOL
 
 s3Manifest="${DIR}/compose/s3-${s3}.yml"
 if [ ! -f "${s3Manifest}" ]; then
@@ -209,7 +219,7 @@ createProxyCfgVolume() {
     local cfg
     cfg="$(mktemp)"
     chmod 644 "${cfg}"
-    envsubst '$STORAGE_PORT' < "${DIR}/compose/auth_proxy_alpha_config.yaml" > "${cfg}"
+    envsubst '$STORAGE_PORT' < "${DIR}/compose/${AUTH_PROXY_ALPHA_CONFIG_FILE}.yaml" > "${cfg}"
     "${container_engine}" cp "${DIR}/compose/auth_proxy_htpasswd" proxy_cfg_helper:/tmp/auth_proxy_htpasswd
     "${container_engine}" cp "${cfg}" proxy_cfg_helper:/tmp/auth_proxy_alpha_config.yaml
 }

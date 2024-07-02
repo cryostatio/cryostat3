@@ -1,6 +1,5 @@
 server:
-  BindAddress: http://0.0.0.0:8080
-  SecureBindAddress: :8443
+  SecureBindAddress: 0.0.0.0:8443
   TLS:
     Key:
       fromFile: /certs/private.key
@@ -27,3 +26,10 @@ providers:
     clientId: CLIENT_ID
     clientSecret: CLIENT_SECRET
     provider: google
+injectRequestHeaders:
+  - name: "X-Forwarded-Proto"
+    values:
+      - fromEnv: CRYOSTAT_PROXY_PROTOCOL
+  - name: "X-Forwarded-Port"
+    values:
+      - fromEnv: CRYOSTAT_PROXY_PORT
