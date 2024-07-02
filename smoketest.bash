@@ -24,7 +24,7 @@ CRYOSTAT_HTTP_PORT=${CRYOSTAT_HTTP_PORT:-8080}
 USE_PROXY=${USE_PROXY:-true}
 DEPLOY_GRAFANA=${DEPLOY_GRAFANA:-true}
 DRY_RUN=${DRY_RUN:-false}
-USE_HTTPS=${USE_HTTPS:-false}
+USE_HTTPS=${USE_HTTPS:-true}
 
 display_usage() {
     echo "Usage:"
@@ -243,7 +243,7 @@ createProxyCertsVolume() {
         exit 2
     fi
 }
-if [ "${USE_PROXY}" = "true" ]; then
+if [ "${USE_PROXY}" = "true" ] && [ "${USE_HTTPS}" = "true" ]; then
     createProxyCertsVolume
 fi
 
