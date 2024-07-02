@@ -37,7 +37,6 @@ services:
       - --alpha-config=/tmp/auth_proxy_alpha_config.yaml
     volumes:
       - auth_proxy_cfg:/tmp
-      - auth_proxy_certs:/certs
     hostname: auth
     ports:
       - "${CRYOSTAT_PROXY_PORT}:${CRYOSTAT_PROXY_PORT}"
@@ -61,6 +60,4 @@ services:
 
 volumes:
   auth_proxy_cfg:
-    external: true
-  auth_proxy_certs:
     external: true

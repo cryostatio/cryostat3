@@ -110,6 +110,7 @@ if [ "${USE_PROXY}" = "true" ]; then
     CRYOSTAT_HTTP_HOST=auth
     CRYOSTAT_HTTP_PORT=8181
     if [ "${USE_HTTPS}" = "true" ]; then
+        FILES+=("${DIR}/compose/auth_proxy_https.yml")
         CRYOSTAT_PROXY_PORT=8443
         CRYOSTAT_PROXY_PROTOCOL=https
         AUTH_PROXY_ALPHA_CONFIG_FILE=auth_proxy_alpha_config_https
@@ -243,7 +244,7 @@ createProxyCertsVolume() {
         exit 2
     fi
 }
-if [ "${USE_PROXY}" = "true" ]; then
+if [ "${USE_PROXY}" = "true" ] && [ "${USE_HTTPS}" = "true" ]; then
     createProxyCertsVolume
 fi
 
