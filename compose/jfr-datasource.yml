@@ -10,7 +10,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.4'
+          cpus: "0.4"
           memory: 512m
     expose:
       - "8080"
@@ -20,9 +20,17 @@ services:
       io.cryostat.jmxHost: "jfr-datasource"
       io.cryostat.jmxPort: "11223"
     environment:
-      JAVA_OPTS_APPEND: "-Dcom.sun.management.jmxremote.autodiscovery=true -Dcom.sun.management.jmxremote -Dcom.sun.management.jmxremote.port=11223 -Dcom.sun.management.jmxremote.rmi.port=11223 -Djava.rmi.server.hostname=jfr-datasource -Dcom.sun.management.jmxremote.authenticate=false -Dcom.sun.management.jmxremote.ssl=false -Dcom.sun.management.jmxremote.local.only=false"
+      JAVA_OPTS_APPEND: >-
+        -Dcom.sun.management.jmxremote.autodiscovery=true
+        -Dcom.sun.management.jmxremote
+        -Dcom.sun.management.jmxremote.port=11223
+        -Dcom.sun.management.jmxremote.rmi.port=11223
+        -Djava.rmi.server.hostname=jfr-datasource
+        -Dcom.sun.management.jmxremote.authenticate=false
+        -Dcom.sun.management.jmxremote.ssl=false
+        -Dcom.sun.management.jmxremote.local.only=false
     healthcheck:
-      test: curl --fail http://localhost:8080/ || exit 1
+      test: curl --fail ${CRYOSTAT_PROXY_PROTOCOL}://localhost:${CRYOSTAT_PROXY_PORT}/ || exit 1
       retries: 3
       interval: 30s
       start_period: 30s

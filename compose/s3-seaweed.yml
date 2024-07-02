@@ -25,7 +25,7 @@ services:
       CRYOSTAT_SECRET_KEY: secret_key
       DATA_DIR: /data
       IP_BIND: 0.0.0.0
-      WEED_V: '4' # glog logging level
+      WEED_V: "4" # glog logging level
     volumes:
       - seaweed_data:/data
     ports:

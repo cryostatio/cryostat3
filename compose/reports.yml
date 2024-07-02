@@ -10,14 +10,21 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.5'
+          cpus: "0.5"
           memory: 512m
     expose:
       - "10001"
     labels:
       kompose.service.expose: "reports"
     environment:
-      JAVA_OPTS_APPEND: "-Dcom.sun.management.jmxremote -Dcom.sun.management.jmxremote.port=11224 -Dcom.sun.management.jmxremote.rmi.port=11224 -Djava.rmi.server.hostname=reports -Dcom.sun.management.jmxremote.authenticate=false -Dcom.sun.management.jmxremote.ssl=false -Dcom.sun.management.jmxremote.local.only=false"
+      JAVA_OPTS_APPEND: >-
+        -Dcom.sun.management.jmxremote
+        -Dcom.sun.management.jmxremote.port=11224
+        -Dcom.sun.management.jmxremote.rmi.port=11224
+        -Djava.rmi.server.hostname=reports
+        -Dcom.sun.management.jmxremote.authenticate=false
+        -Dcom.sun.management.jmxremote.ssl=false
+        -Dcom.sun.management.jmxremote.local.only=false
       QUARKUS_HTTP_PORT: 10001
     healthcheck:
       test: curl --fail http://localhost:10001/ || exit 1

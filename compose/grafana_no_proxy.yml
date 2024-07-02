@@ -6,7 +6,7 @@ services:
       - GRAFANA_DASHBOARD_URL=http://grafana:3000
   grafana:
     ports:
-      - '3000:3000'
+      - "3000:3000"
     environment:
       - GF_SERVER_DOMAIN=
       - GF_SERVER_ROOT_URL=

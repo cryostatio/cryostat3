@@ -1,0 +1,9 @@
+version: "3"
+services:
+  auth:
+    volumes:
+      - auth_proxy_certs:/certs
+
+volumes:
+  auth_proxy_certs:
+    external: true

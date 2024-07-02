@@ -147,6 +147,8 @@ This will spin up the cryostat container and its required services.
 $ ./mvnw package ; podman image prune -f
 # alternatively, use Quarkus CLI instead of the Maven wrapper
 $ quarkus build ; podman image prune -f
+# generate a certificate and key for the server to enable HTTPS connections
+$ sh compose/auth_certs/generate.sh
 # check the available smoketest options
 $ bash smoketest.bash -h
 # run a smoketest scenario
